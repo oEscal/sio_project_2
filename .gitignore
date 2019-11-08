@@ -102,3 +102,14 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# vs code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# all files created by the server
+files/*
