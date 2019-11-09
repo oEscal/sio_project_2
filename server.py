@@ -13,6 +13,8 @@ STATE_CONNECT = 0
 STATE_OPEN = 1
 STATE_DATA = 2
 STATE_CLOSE= 3
+STATE_KEY = 4
+
 
 #GLOBAL
 storage_dir = 'files'

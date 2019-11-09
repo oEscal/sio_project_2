@@ -5,12 +5,15 @@ import argparse
 import coloredlogs, logging
 import os
 
+from asymmetric_tools import key_pair_generation
+
 logger = logging.getLogger('root')
 
 STATE_CONNECT = 0
 STATE_OPEN = 1
 STATE_DATA = 2
 STATE_CLOSE = 3
+STATE_KEY = 4
 
 
 class ClientProtocol(asyncio.Protocol):
@@ -29,6 +32,8 @@ class ClientProtocol(asyncio.Protocol):
         self.loop = loop
         self.state = STATE_CONNECT  # Initial State
         self.buffer = ''  # Buffer to receive data chunks
+
+        self.private_key = ''
 
     def connection_made(self, transport) -> None:
         """
@@ -96,7 +101,12 @@ class ClientProtocol(asyncio.Protocol):
         if mtype == 'OK':  # Server replied OK. We can advance the state
             if self.state == STATE_OPEN:
                 logger.info("Channel open")
-                self.send_file(self.file_name)
+                
+                # first, we ask for server's public key and we send ours public key
+                # TODO -> por agora, usamos rsa, depois pode se meter a dar com outro, sendo que nesse caso o cliente e o servidor têm de negociar qual o algoritmo vão usar
+                self.send_key()
+
+                #self.send_file(self.file_name)
             elif self.state == STATE_DATA:  # Got an OK during a message transfer.
                 # Reserved for future use
                 pass
@@ -120,6 +130,14 @@ class ClientProtocol(asyncio.Protocol):
         """
         logger.info('The server closed the connection')
         self.loop.stop()
+
+    def send_key(self):
+        self.private_key, public_key = key_pair_generation(2048)
+        self._send({
+            'type': 'PUBLIC_KEY',
+            'data': public_key,
+        })
+        logger.info("Public key sent")
 
     def send_file(self, file_name: str) -> None:
         """
