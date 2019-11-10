@@ -7,15 +7,11 @@ import re
 import os
 from aio_tcpserver import tcp_server
 
+from utils import *
+from messages import *
 from asymmetric_tools import key_pair_generation
 
 logger = logging.getLogger('root')
-
-STATE_CONNECT = 0
-STATE_OPEN = 1
-STATE_DATA = 2
-STATE_CLOSE= 3
-STATE_KEY = 4
 
 
 #GLOBAL
@@ -125,6 +121,7 @@ class ClientHandler(asyncio.Protocol):
 			self.state = STATE_CLOSE
 			self.transport.close()
 	
+
 	def send_key(self, message: str) -> bool:
 		try:
 			if 'data' not in message:
@@ -134,15 +131,13 @@ class ClientHandler(asyncio.Protocol):
 			self.client_public_key_pem = message['data'].encode()
 
 			self.private_key, public_key = key_pair_generation(2048)
-			self._send({
-      	    'type': 'PUBLIC_KEY',
-      	    'data': public_key.decode(),
-      	})
+			self._send(public_key_message(public_key))
 			logger.info("Public key sent")
 		except Exception as e:
 			logger.exception("Error creating and sending the public key")
 			return False
 		return True
+
 
 	def process_open(self, message: str) -> bool:
 		"""

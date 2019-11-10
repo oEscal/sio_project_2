@@ -5,15 +5,11 @@ import argparse
 import coloredlogs, logging
 import os
 
+from utils import *
+from messages import *
 from asymmetric_tools import key_pair_generation
 
 logger = logging.getLogger('root')
-
-STATE_CONNECT = 0
-STATE_OPEN = 1
-STATE_DATA = 2
-STATE_CLOSE = 3
-STATE_KEY = 4
 
 
 class ClientProtocol(asyncio.Protocol):
@@ -133,13 +129,12 @@ class ClientProtocol(asyncio.Protocol):
         logger.info('The server closed the connection')
         self.loop.stop()
 
+
     def send_key(self):
         self.private_key, public_key = key_pair_generation(2048)
-        self._send({
-            'type': 'PUBLIC_KEY',
-            'data': public_key.decode(),
-        })
+        self._send(public_key_message(public_key))
         logger.info("Public key sent")
+
 
     def send_file(self, file_name: str) -> None:
         """
