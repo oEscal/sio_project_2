@@ -4,13 +4,15 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 import getpass
+import os
 
 # pa ficheiros grandes nao se usa a assimetrica, porque é bue expensioso. O que se faz é uma cena hibrida, em que se cifra o ficheiro com uma
 # mais simples(simetrica), e depois a chave com uma assimetrica; assim pa ter acesso ao file precis da assimetrica anyway
 # tirei foto(lado esquerdo encriptar, direito desisncriptar)
 
 def key_pair_generation(key_length):
-   password = getpass.getpass()
+   # TODO -> change this maybe
+   pass_size = 37
 
    private_key = rsa.generate_private_key(
       public_exponent=65537,
@@ -23,7 +25,7 @@ def key_pair_generation(key_length):
    return private_key.private_bytes(  
       encoding=serialization.Encoding.PEM,  
       format=serialization.PrivateFormat.TraditionalOpenSSL,  
-      encryption_algorithm=serialization.BestAvailableEncryption(password.encode())  
+      encryption_algorithm=serialization.BestAvailableEncryption(os.urandom(pass_size))  
    ), public_key.public_bytes(  
       encoding=serialization.Encoding.PEM,  
       format=serialization.PublicFormat.SubjectPublicKeyInfo,
