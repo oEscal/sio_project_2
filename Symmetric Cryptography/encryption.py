@@ -3,7 +3,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 
 
-def file_encryption(
+def encryption(
     user_file, encrypted_file, encryption_algorithm, hash_algorithm="SHA256"
 ):
 
@@ -22,10 +22,16 @@ def file_encryption(
     padding_length = (iv_length - (file_length % iv_length)) % iv_length
     file_content += padding_length * "\x00"
 
+    block_size = 1024 * 1024 * 4096
     encryptor = cipher.encryptor()
-    # TODO -> read file in blobs
-    ct = encryptor.update(str.encode(file_content))  + encryptor.finalize() 
+
     
+    ct = str.encode("")
+    for padding in range(0, len(file_content), block_size):
+        ct += encryptor.update(str.encode(file_content[padding : padding + block_size]))
+    ct+= encryptor.finalize()
+    
+
     symmetric_protocol = Symmetric_protocol(
         params["iv"], params["salt"], padding_length, ct
     )

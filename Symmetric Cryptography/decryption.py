@@ -3,7 +3,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 
 
-def file_decryption(
+def decryption(
     encrypted_file, decrypted_file, encryption_algorithm, hash_algorithm="SHA256"
 ):
 
