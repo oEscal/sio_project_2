@@ -34,6 +34,7 @@ class ClientProtocol(asyncio.Protocol):
         self.buffer = ''  # Buffer to receive data chunks
 
         self.private_key = ''
+        self.server_public_key_pem = ''
 
     def connection_made(self, transport) -> None:
         """
@@ -106,14 +107,15 @@ class ClientProtocol(asyncio.Protocol):
                 # TODO -> por agora, usamos rsa, depois pode se meter a dar com outro, sendo que nesse caso o cliente e o servidor têm de negociar qual o algoritmo vão usar
                 self.send_key()
 
-                #self.send_file(self.file_name)
+                #self.send_file(self.file_name)               
             elif self.state == STATE_DATA:  # Got an OK during a message transfer.
                 # Reserved for future use
                 pass
             else:
                 logger.warning("Ignoring message from server")
             return
-
+        elif mtype == 'PUBLIC_KEY':
+            self.client_public_key_pem = message['data'].encode()
         elif mtype == 'ERROR':
             logger.warning("Got error from server: {}".format(message.get('data', None)))
         else:
@@ -135,7 +137,7 @@ class ClientProtocol(asyncio.Protocol):
         self.private_key, public_key = key_pair_generation(2048)
         self._send({
             'type': 'PUBLIC_KEY',
-            'data': public_key,
+            'data': public_key.decode(),
         })
         logger.info("Public key sent")
 
