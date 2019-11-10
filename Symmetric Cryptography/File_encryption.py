@@ -19,16 +19,13 @@ def file_encryption(
     )
 
     iv_length = params["iv_length"]
-    block_size = 1024 ** 2 * 4096
     padding_length = (iv_length - (file_length % iv_length)) % iv_length
     file_content += padding_length * "\x00"
 
     encryptor = cipher.encryptor()
-    ct = str.encode("")
-    for padding in range(0, file_length, block_size):
-        ct += encryptor.update(str.encode(file_content[padding : padding + block_size]))
-    ct = ct + encryptor.finalize()
-
+    # TODO -> read file in blobs
+    ct = encryptor.update(str.encode(file_content))  + encryptor.finalize() 
+    
     symmetric_protocol = Symmetric_protocol(
         params["iv"], params["salt"], padding_length, ct
     )
