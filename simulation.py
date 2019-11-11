@@ -1,28 +1,11 @@
-from Symmetric_tools.encryption import encryption
-from Symmetric_tools.decryption import decryption
-from Symmetric_tools.Symmetric_key_generation import symmetric_key_generation
-from Symmetric_tools.utils import cipher_params
+from decryption import *
+from utils import *
 from asymmetric_tools import *
 
 import getpass
 
 
 def main():
-    key_length = 1024
-
-    user_pass = getpass.getpass()
-
-    private_key, public_key = key_pair_generation(key_length, user_pass)
-
-    pub_key_file = open("public.pem", "wb")
-    pub_key_file.write(public_key)
-    pub_key_file.close()
-
-    pri_key_file = open("private.pem", "wb")
-    pri_key_file.write(private_key)
-    pri_key_file.close()
-
-
     length = 32
     cipher_algorithm = "AES" #AES OR TripleDES
 
@@ -32,7 +15,7 @@ def main():
         SE ESCOLHERES AES length = 32
     '''
 
-    key, salt = symmetric_key_generation("SHA256", user_pass, length)
+    key, salt = symmetric_key_generation("SHA256", getpass.getpass(), length)
 
     algorithm, iv = cipher_params(cipher_algorithm, key)
 

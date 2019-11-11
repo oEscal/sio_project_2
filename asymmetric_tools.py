@@ -10,8 +10,8 @@ import getpass
 # tirei foto(lado esquerdo encriptar, direito desisncriptar)
 
 
-def key_pair_generation(key_length, password='password'):
-
+def key_pair_generation(key_length, password="password"):
+    
     private_key = rsa.generate_private_key(
         public_exponent=65537, key_size=key_length, backend=default_backend()
     )
