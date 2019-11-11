@@ -3,8 +3,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 
 
-def decryption(
-    encrypted_file, decrypted_file,algorithm):
+def decryption(encrypted_file, decrypted_file,algorithm):
 
     symmetric_protocol = read_protocol(open(encrypted_file, "rb"))
 

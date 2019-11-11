@@ -1,5 +1,5 @@
 import os
-from .hash_algorithms import HASHES
+from .utils import HASHES
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 

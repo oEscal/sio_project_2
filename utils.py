@@ -1,11 +1,31 @@
 import getpass
 import os
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes, hashes
 from .Symmetric_key_generation import symmetric_key_generation
-from .cipher_algorithms import CIPHERS
 import binascii
 import pickle
 
+
+class CIPHERS:
+    def __init__(self, cipher):
+        self.cipher = cipher
+        self.available_ciphers = ["ChaCha20", "AES", "TripleDES"]
+
+    def get_cipher(self):
+        if self.cipher not in self.available_ciphers:
+            raise Exception("Invalid Cipher mode")
+        return getattr(algorithms, self.cipher)
+
+
+class HASHES:
+    def __init__(self, algorithm):
+        self.algorithm = algorithm.upper()
+        self.availables_algorithm = ["SHA256", "SHA512", "MD5"]
+
+    def get_hash(self):
+        if self.algorithm not in self.availables_algorithm:
+            raise Exception("Invalid Encryption Algorithm")
+        return getattr(hashes, self.algorithm)
 
 class Symmetric_protocol:
     def __init__(self, iv, salt, padding, content):
