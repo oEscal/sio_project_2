@@ -25,18 +25,5 @@ def main():
     f.write(key)
     f.close()
 
-    rsa_encryption("file_key.bin", "encrypted_file_key.bin")
-
-    # DECRYPT
-
-    rsa_decryption("file_key_decrypted.bin", "encrypted_file_key.bin")
-
-    key = open("file_key_decrypted.bin", "rb").read()
-
-    algorithm, iv = cipher_params(cipher_algorithm, key)
-
-    decryption("encrypted.txt", "decrypted_file.out", algorithm)
-
-
 if __name__ == "__main__":
     main()
