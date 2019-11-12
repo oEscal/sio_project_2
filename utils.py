@@ -20,7 +20,7 @@ def symmetric_key_generation(hash_algorithm, key, length, salt_value=None):
     upper_hash_alg = hash_algorithm.upper()
     if upper_hash_alg in AVAILABLE_HASHES:
         kdf = PBKDF2HMAC(
-            algorithm=upper_hash_alg,
+            algorithm=getattr(hashes, upper_hash_alg),
             length=length,
             salt=salt,
             iterations=number_iterations,
@@ -91,7 +91,7 @@ def cipher_params(cipher_algorithm, key):
     iv = None
     iv_length = 16  # defaul value
 
-    cipher_mode = CIPHERS(cipher_algorithm).get_cipher()
+    cipher_mode = getattr(algorithms, cipher_algorithm)
 
     #TODO -> ChaCha20
     if cipher_mode.name == "ChaCha20":

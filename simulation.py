@@ -19,7 +19,7 @@ def main():
 
     algorithm, iv = cipher_params(cipher_algorithm, key)
 
-    encryption("data.txt", "encrypted.txt", algorithm, iv, salt)
+    encryption("README.md", "encrypted.txt", algorithm, iv, salt)
 
     f = open("file_key.bin", "wb")
     f.write(key)
