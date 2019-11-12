@@ -11,6 +11,29 @@ import pickle
 AVAILABLE_CIPHERS = ["ChaCha20", "AES", "TripleDES"]
 AVAILABLE_HASHES = ["SHA256", "SHA512", "MD5"]
 
+
+def cipher_params(cipher_algorithm, key):
+
+    algorithm = None
+    iv = None
+    iv_length = 16  # defaul value
+
+    cipher_mode = getattr(algorithms, cipher_algorithm)
+
+    #TODO -> ChaCha20
+    if cipher_mode.name == "ChaCha20":
+        pass
+    elif cipher_mode.name in AVAILABLE_CIPHERS:
+        algorithm = cipher_mode(key)
+        iv_length = algorithm.block_size // 8
+        iv = os.urandom(iv_length)
+    else:
+        # TODO -> depois tratar desta exceção em concreto no servidor/cliente com um except
+        raise Exception("Invalid Cipher mode")
+
+    return algorithm,iv
+
+
 def symmetric_key_generation(hash_algorithm, key, length, salt_value=None):
 
     backend = default_backend()
@@ -32,20 +55,17 @@ def symmetric_key_generation(hash_algorithm, key, length, salt_value=None):
 def encryption(user_file, encrypted_file, cipher_algorithm, iv, salt):
 
     f = open(user_file, "r")
-    file_content = f.read()
-    file_length = len(file_content)
-    f.close()
-
-    cipher = Cipher(cipher_algorithm, modes.CBC(iv), backend=default_backend())
+    with open(user_file, 'r'):
+        file_content = f.read()
 
 
     iv_length = len(iv)
-    padding_length = (iv_length - (file_length % iv_length)) % iv_length
+    padding_length = (iv_length - (len(file_content) % iv_length)) % iv_length
     file_content += padding_length * "\x00"
-
 
     block_size = 1024 * 1024 * 4096  # 4MB
 
+    cipher = Cipher(cipher_algorithm, modes.CBC(iv), backend=default_backend())
     encryptor = cipher.encryptor()
 
     ct = str.encode("")
@@ -55,9 +75,27 @@ def encryption(user_file, encrypted_file, cipher_algorithm, iv, salt):
     
     symmetric_protocol = Symmetric_protocol(iv, salt, padding_length, ct)
     
+    # TODO -> talvez possa ser melhorado
     cryptogram_file = open(encrypted_file, "wb")
     write_protocol(symmetric_protocol, cryptogram_file)
     cryptogram_file.close()
+
+
+def decryption(encrypted_file, decrypted_file,algorithm):
+
+    symmetric_protocol = read_protocol(open(encrypted_file, "rb"))
+
+    iv, salt, end_file_padding, file_content = symmetric_protocol.unpacking()
+    cipher = Cipher(algorithm, mode=modes.CBC(iv), backend=default_backend())
+    decryptor = cipher.decryptor()
+
+    output = decryptor.update(file_content) + decryptor.finalize()
+    decryption_result = output[:-end_file_padding].decode()
+    
+    # TODO -> talvez possa ser melhorado
+    f = open(decrypted_file, "w")
+    f.write(decryption_result)
+    f.close()
 
 
 class Symmetric_protocol:
@@ -81,28 +119,3 @@ def read_protocol(readable_file):
 
 def prettier(blob):
     return binascii.hexlify(blob)
-
-
-
-
-def cipher_params(cipher_algorithm, key):
-
-    algorithm = None
-    iv = None
-    iv_length = 16  # defaul value
-
-    cipher_mode = getattr(algorithms, cipher_algorithm)
-
-    #TODO -> ChaCha20
-    if cipher_mode.name == "ChaCha20":
-        pass
-    elif cipher_mode.name in AVAILABLE_CIPHERS:
-        algorithm = cipher_mode(key)
-        iv_length = algorithm.block_size // 8
-        iv = os.urandom(iv_length)
-    else:
-        # TODO -> depois tratar desta exceção em concreto no servidor/cliente com um except
-        raise Exception("Invalid Cipher mode")
-
-    return algorithm,iv
-
