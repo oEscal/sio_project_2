@@ -4,8 +4,8 @@ import base64
 import argparse
 import coloredlogs, logging
 import os
-
-from asymmetric_tools import key_pair_generation
+import random
+from utils import ProtoAlgorithm
 
 logger = logging.getLogger('root')
 
@@ -14,13 +14,14 @@ STATE_OPEN = 1
 STATE_DATA = 2
 STATE_CLOSE = 3
 STATE_KEY = 4
+STATE_ALGORITHM_NEGOTIATION = 5
+STATE_ALGORITHM_ACK = 6
 
 
 class ClientProtocol(asyncio.Protocol):
     """
     Client that handles a single client
     """
-
     def __init__(self, file_name, loop):
         """
         Default constructor
@@ -33,7 +34,7 @@ class ClientProtocol(asyncio.Protocol):
         self.state = STATE_CONNECT  # Initial State
         self.buffer = ''  # Buffer to receive data chunks
 
-        self.private_key = ''
+        self.current_algorithm = None
 
     def connection_made(self, transport) -> None:
         """
@@ -45,12 +46,14 @@ class ClientProtocol(asyncio.Protocol):
         self.transport = transport
 
         logger.debug('Connected to Server')
-        
-        message = {'type': 'OPEN', 'file_name': self.file_name}
-        self._send(message)
 
-        self.state = STATE_OPEN
+        #ALGORITHMS NEGOTIATION
+        self.ask_for_algorithms()
 
+        #message = {'type': 'OPEN', 'file_name': self.file_name}
+        #self._send(message)
+
+        #self.state = STATE_OPEN
 
     def data_received(self, data: str) -> None:
         """
@@ -70,12 +73,14 @@ class ClientProtocol(asyncio.Protocol):
 
         while idx >= 0:  # While there are separators
             frame = self.buffer[:idx + 2].strip()  # Extract the JSON object
-            self.buffer = self.buffer[idx + 2:]  # Removes the JSON object from the buffer
+            self.buffer = self.buffer[
+                idx + 2:]  # Removes the JSON object from the buffer
 
             self.on_frame(frame)  # Process the frame
             idx = self.buffer.find('\r\n')
 
-        if len(self.buffer) > 4096 * 1024 * 1024:  # If buffer is larger than 4M
+        if len(self.buffer
+               ) > 4096 * 1024 * 1024:  # If buffer is larger than 4M
             logger.warning('Buffer to large')
             self.buffer = ''
             self.transport.close()
@@ -99,14 +104,16 @@ class ClientProtocol(asyncio.Protocol):
         mtype = message.get('type', None)
 
         if mtype == 'OK':  # Server replied OK. We can advance the state
-            if self.state == STATE_OPEN:
-                logger.info("Channel open")
+            if self.state == STATE_ALGORITHM_ACK:
+                logger.info("Algorithm chosen\tSending FileName")
                 
-                # first, we ask for server's public key and we send ours public key
-                # TODO -> por agora, usamos rsa, depois pode se meter a dar com outro, sendo que nesse caso o cliente e o servidor têm de negociar qual o algoritmo vão usar
-                #self.send_key()
+                self.send_fileName(self.file_name)
+
+            elif self.state == STATE_OPEN:
+                logger.info("Sending file content")
 
                 self.send_file(self.file_name)
+
             elif self.state == STATE_DATA:  # Got an OK during a message transfer.
                 # Reserved for future use
                 pass
@@ -114,13 +121,79 @@ class ClientProtocol(asyncio.Protocol):
                 logger.warning("Ignoring message from server")
             return
 
+        elif mtype == 'ALL_ALGORITHMS':
+
+            if self.state == STATE_ALGORITHM_NEGOTIATION:
+                data = message.get('data', None)
+                if data is not None:
+                    self.choose_algorithm(data)
+                    return
+            
+            else:
+                logger.warning(
+                    "Ignoring message from server ( Invalid state ) ")
+
         elif mtype == 'ERROR':
-            logger.warning("Got error from server: {}".format(message.get('data', None)))
+            logger.warning("Got error from server: {}".format(
+                message.get('data', None)))
         else:
             logger.warning("Invalid message type")
 
         self.transport.close()
         self.loop.stop()
+
+    def send_fileName(self,fileName):
+        message = {'type': 'OPEN', 'file_name': self.file_name}
+        self._send(message)
+        self.state = STATE_OPEN
+
+    def choose_algorithm(self, algorithms):
+
+        logger.debug(f"Availables algorithms :  {algorithms}")
+
+
+        ciphers = algorithms.get('ciphers', None)
+        synthesis_algorithm = algorithms.get('synthesis_algorithm', None)
+        modes = algorithms.get('modes', None)
+
+        #TODO -> Ver como escolher os algoritmos
+        #PS: Caso nao seja necessario o random eliminar o respetivo import
+
+        if ciphers and synthesis_algorithm and modes:
+            self.current_algorithm = ProtoAlgorithm(
+                random.choice(ciphers), random.choice(modes),
+                random.choice(synthesis_algorithm))
+            
+            self.state = STATE_ALGORITHM_ACK
+            
+            message = {
+                'type' : 'ALGORITHM_ACK',
+                'data': self.current_algorithm.packing()
+            }
+
+            self._send(message)
+            return
+
+        self.transport.close()
+        self.loop.stop()
+
+    def ask_for_algorithms(self):
+        """
+        Client asking which algoritms a server had
+        :param exc:
+        :return:
+        """
+        if self.state != STATE_CONNECT:
+            logger.debug("Invalid state")
+            self.transport.close()
+            self.loop.stop()
+
+        self.state = STATE_ALGORITHM_NEGOTIATION
+
+        message = {'type': "ALGORITHM_NEGOTIATION"}
+
+        logger.debug("Asking for server to describe their algorithms")
+        self._send(message)
 
     def connection_lost(self, exc):
         """
@@ -131,13 +204,13 @@ class ClientProtocol(asyncio.Protocol):
         logger.info('The server closed the connection')
         self.loop.stop()
 
-    def send_key(self):
-        self.private_key, public_key = key_pair_generation(2048)
-        self._send({
-            'type': 'PUBLIC_KEY',
-            'data': public_key,
-        })
-        logger.info("Public key sent")
+    #def send_key(self):
+    #    self.private_key, public_key = key_pair_generation(2048)
+    #    self._send({
+    #        'type': 'PUBLIC_KEY',
+    #        'data': public_key,
+    #    })
+    #    logger.info("Public key sent")
 
     def send_file(self, file_name: str) -> None:
         """
@@ -176,13 +249,22 @@ class ClientProtocol(asyncio.Protocol):
 
 def main():
     parser = argparse.ArgumentParser(description='Sends files to servers.')
-    parser.add_argument('-v', action='count', dest='verbose',
+    parser.add_argument('-v',
+                        action='count',
+                        dest='verbose',
                         help='Shows debug messages',
                         default=0)
-    parser.add_argument('-s', type=str, nargs=1, dest='server', default='127.0.0.1',
+    parser.add_argument('-s',
+                        type=str,
+                        nargs=1,
+                        dest='server',
+                        default='127.0.0.1',
                         help='Server address (default=127.0.0.1)')
-    parser.add_argument('-p', type=int, nargs=1,
-                        dest='port', default=5000,
+    parser.add_argument('-p',
+                        type=int,
+                        nargs=1,
+                        dest='port',
+                        default=5000,
                         help='Server port (default=5000)')
 
     parser.add_argument(type=str, dest='file_name', help='File to send')
@@ -196,7 +278,8 @@ def main():
     coloredlogs.install(level)
     logger.setLevel(level)
 
-    logger.info("Sending file: {} to {}:{} LogLevel: {}".format(file_name, server, port, level))
+    logger.info("Sending file: {} to {}:{} LogLevel: {}".format(
+        file_name, server, port, level))
 
     loop = asyncio.get_event_loop()
     coro = loop.create_connection(lambda: ClientProtocol(file_name, loop),
@@ -204,6 +287,7 @@ def main():
     loop.run_until_complete(coro)
     loop.run_forever()
     loop.close()
+
 
 if __name__ == '__main__':
     main()

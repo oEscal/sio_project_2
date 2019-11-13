@@ -6,6 +6,7 @@ import coloredlogs, logging
 import re
 import os
 from aio_tcpserver import tcp_server
+from utils import AVAILABLE_CIPHERS,AVAILABLE_HASHES,AVAILABLE_MODES,ProtoAlgorithm,unpacking
 
 logger = logging.getLogger('root')
 
@@ -14,6 +15,8 @@ STATE_OPEN = 1
 STATE_DATA = 2
 STATE_CLOSE= 3
 STATE_KEY = 4
+STATE_ALGORITHM_NEGOTIATION = 5
+STATE_ALGORITHM_CLIENT_ACK = 6
 
 
 #GLOBAL
@@ -32,6 +35,7 @@ class ClientHandler(asyncio.Protocol):
 		self.storage_dir = storage_dir
 		self.buffer = ''
 		self.peername = ''
+		self.current_algorithm = None
 
 	def connection_made(self, transport) -> None:
 		"""
@@ -99,6 +103,10 @@ class ClientHandler(asyncio.Protocol):
 			ret = self.process_data(message)
 		elif mtype == 'CLOSE':
 			ret = self.process_close(message)
+		elif mtype == 'ALGORITHM_NEGOTIATION':
+			ret = self.process_algorithm_negotiation(message)
+		elif mtype == 'ALGORITHM_ACK':
+			ret = self.process_algorithm_ACK(message)
 		else:
 			logger.warning("Invalid message type: {}".format(message['type']))
 			ret = False
@@ -117,6 +125,73 @@ class ClientHandler(asyncio.Protocol):
 			self.state = STATE_CLOSE
 			self.transport.close()
 
+	def process_algorithm_ACK(self,message : str) -> bool:
+		"""
+		Processes an algorithm ACK from the client ( client have decided which algorithms he want to use)
+
+		:param message: The message to process
+		:return: Boolean indicating the success of the operation
+		"""
+		
+		logger.debug(f"Process algorithm ACK: {message}")
+
+		if self.state != STATE_ALGORITHM_NEGOTIATION:
+			logger.warning("Invalid state. Discarding")
+			return False
+		
+		#CHECK IF ALGORITHM CHOSEN IS CORRECT AND AVAILABLE IN SERVER SIDE
+		
+		chosen_algorithm = message.get('data' , None)
+		if chosen_algorithm is None:
+			return False
+
+
+		algorithm, cipher, mode, synthesis_algorithm = unpacking(chosen_algorithm)
+
+		if cipher in AVAILABLE_CIPHERS and mode in AVAILABLE_MODES and synthesis_algorithm in AVAILABLE_HASHES:
+			self.current_algorithm = ProtoAlgorithm(cipher, mode, synthesis_algorithm)
+
+			message = {
+				'type' : 'OK'
+			}
+
+			self._send(message)
+
+			self.state = STATE_ALGORITHM_CLIENT_ACK 
+			return True
+		
+		return False
+
+	def process_algorithm_negotiation(self, message : str) -> bool:
+		"""
+		Processes an algorithm negotiation from the client
+
+		:param message: The message to process
+		:return: Boolean indicating the success of the operation
+		"""
+
+
+		logger.debug(f"Process algorithm negotiation: {message}")
+
+		if self.state != STATE_CONNECT:
+			logger.warning("Invalid state. Discarding")
+			return False
+
+		self.state = STATE_ALGORITHM_NEGOTIATION
+
+		message = {
+			'type' : 'ALL_ALGORITHMS',
+			'data' : {
+				'ciphers' :  AVAILABLE_CIPHERS,
+				'synthesis_algorithm' : AVAILABLE_HASHES,
+				'modes' : AVAILABLE_MODES
+			}
+		}
+
+		self._send(message)
+		
+		return True
+
 
 	def process_open(self, message: str) -> bool:
 		"""
@@ -128,7 +203,7 @@ class ClientHandler(asyncio.Protocol):
 		"""
 		logger.debug("Process Open: {}".format(message))
 
-		if self.state != STATE_CONNECT:
+		if self.state != STATE_ALGORITHM_CLIENT_ACK :
 			logger.warning("Invalid state. Discarding")
 			return False
 
@@ -173,8 +248,8 @@ class ClientHandler(asyncio.Protocol):
 
 		if self.state == STATE_OPEN:
 			self.state = STATE_DATA
-			# First Packet
-
+		
+		
 		elif self.state == STATE_DATA:
 			# Next packets
 			pass
@@ -222,6 +297,7 @@ class ClientHandler(asyncio.Protocol):
 		self.state = STATE_CLOSE
 
 		return True
+
 
 
 	def _send(self, message: str) -> None:
