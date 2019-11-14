@@ -104,9 +104,9 @@ class ClientProtocol(asyncio.Protocol):
                 
                 # first, we ask for server's public key and we send ours public key
                 # TODO -> por agora, usamos rsa, depois pode se meter a dar com outro, sendo que nesse caso o cliente e o servidor têm de negociar qual o algoritmo vão usar
-                self.send_key()
+                #self.send_key()
 
-                #self.send_file(self.file_name)
+                self.send_file(self.file_name)
             elif self.state == STATE_DATA:  # Got an OK during a message transfer.
                 # Reserved for future use
                 pass
