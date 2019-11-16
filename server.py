@@ -6,7 +6,8 @@ import coloredlogs, logging
 import re
 import os
 from aio_tcpserver import tcp_server
-from utils import AVAILABLE_CIPHERS, AVAILABLE_HASHES, AVAILABLE_MODES, ProtoAlgorithm, unpacking, DH_parameters, DH_parametersNumbers
+from utils import AVAILABLE_CIPHERS, AVAILABLE_HASHES, AVAILABLE_MODES, ProtoAlgorithm, unpacking, DH_parameters, DH_parametersNumbers,\
+         key_derivation, length_by_cipher, decryption
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
@@ -42,6 +43,7 @@ class ClientHandler(asyncio.Protocol):
         self.DH_private_key = None
         self.DH_public_key = None
         self.shared_key = None
+        self.salt = None
 
     def connection_made(self, transport) -> None:
         """
@@ -169,8 +171,10 @@ class ClientHandler(asyncio.Protocol):
 
             self.state = STATE_DH_EXCHANGE_KEYS
 
-            self.shared_key = self.DH_private_key.exchange(
-                load_pem_public_key(key.encode(), default_backend()))
+            self.shared_key = key_derivation(
+                "SHA512", length_by_cipher[self.current_algorithm.cipher],
+                self.DH_private_key.exchange(
+                    load_pem_public_key(key.encode(), default_backend())))
 
             logger.info(f"Shared_key with DH : {self.shared_key}")
         except Exception as e:
@@ -293,7 +297,25 @@ class ClientHandler(asyncio.Protocol):
                 logger.debug("Invalid message. No data found")
                 return False
 
-            bdata = base64.b64decode(message['data'])
+            cipher = self.current_algorithm.cipher
+            mode = self.current_algorithm.mode
+
+
+            padding_length = message.get('padding_length', None)
+            iv = message.get('iv','None')
+
+            
+            if padding_length is None or iv is None:
+                return False
+
+            
+            iv = base64.b64decode(iv)
+            encrypted_data = base64.b64decode(message['data'])
+            
+
+            decrypted_data = base64.b64encode(decryption(encrypted_data, self.shared_key, cipher, mode,padding_length,iv))
+            
+            bdata = base64.b64decode( decrypted_data )
         except:
             logger.exception(
                 "Could not decode base64 content from message.data")

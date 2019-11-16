@@ -13,7 +13,8 @@ import random
 
 AVAILABLE_CIPHERS = ["ChaCha20", "AES", "TripleDES"]
 AVAILABLE_HASHES = ["SHA256", "SHA512", "MD5"]
-AVAILABLE_MODES = ["CBC", "GCM"]
+#AVAILABLE_MODES = ["CBC", "GCM"]
+AVAILABLE_MODES = ["CBC"]
 length_by_cipher = {'ChaCha20': 32, 'AES': 32, 'TripleDES': 24}
 
 
@@ -73,23 +74,22 @@ def symmetric_key_generation(hash_algorithm, key, length, salt_value=None):
 
 def key_derivation(hash_algorithm, length, key):
     backend = default_backend()
-    salt = os.urandom(16)
+    #salt = os.urandom(16)
+
+    #melhorar isto passando um salt diferente de None, mas depois tem que se passar este valor para o server
 
     upper_hash_alg = hash_algorithm.upper()
-    #print(getattr(hashes, upper_hash_alg))
+    #getattr(hashes, upper_hash_alg) -> ver pq esta a dar erro
     return HKDF(algorithm=hashes.SHA512(),
                 length=length,
-                salt=salt,
+                salt=None,
                 info=b'handshake data',
                 backend=backend).derive(key)
 
 
-def encryption(data, key, cipher_algorithm, mode, synthesis_algorithm):
+def encryption(data, key, cipher_algorithm, mode):
 
-    key_derived = key_derivation(synthesis_algorithm,
-                                 length_by_cipher[cipher_algorithm], key)
-
-    algorithm, iv = cipher_params(cipher_algorithm, key_derived)
+    algorithm, iv = cipher_params(cipher_algorithm, key)
 
     if iv is None:  #For ChaCha20
         iv_length = 16
@@ -98,9 +98,10 @@ def encryption(data, key, cipher_algorithm, mode, synthesis_algorithm):
 
     padding_length = (iv_length - (len(data) % iv_length)) % iv_length
     data += (padding_length * "\x00").encode()
-
+    
     if iv is None:  # For ChaCha20
         cipher = Cipher(algorithm, None, backend=default_backend())
+        iv = algorithm.nonce
     else:
         cipher = Cipher(
             algorithm,
@@ -108,10 +109,39 @@ def encryption(data, key, cipher_algorithm, mode, synthesis_algorithm):
                 iv
             ),  #verificar erros disto ( ou ter a certeza que o parametro passado é sempre correto)
             backend=default_backend())
-    
+
     encryptor = cipher.encryptor()
 
-    return encryptor.update(data) + encryptor.finalize()
+    
+    return encryptor.update(data) + encryptor.finalize(), padding_length, iv
+
+
+def decryption(data, key, cipher_algorithm, mode, padding_length,iv ):
+    
+    cipher_mode = getattr( algorithms, cipher_algorithm)
+    if cipher_algorithm != 'ChaCha20':
+        algorithm = cipher_mode(key)
+    else:
+        algorithm = cipher_mode(key, iv)
+    
+    if cipher_algorithm == 'ChaCha20':  # For ChaCha20
+        cipher = Cipher(algorithm, mode=None, backend=default_backend())
+    else:
+        cipher = Cipher(
+            algorithm,
+            mode=modes.CBC(iv)
+            if mode == 'CBC' else modes.GCM(iv, tag),  #tentar melhorar isto
+            backend=default_backend())
+
+    decryptor = cipher.decryptor()
+
+    
+    output = decryptor.update(data) + decryptor.finalize()
+
+    if padding_length == 0:
+        return output
+    
+    return output[:-padding_length]
 
 
 def encryption_file(user_file, encrypted_file, cipher_algorithm, mode, iv,

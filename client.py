@@ -5,7 +5,7 @@ import argparse
 import coloredlogs, logging
 import os
 import random
-from utils import ProtoAlgorithm, AVAILABLE_CIPHERS, AVAILABLE_HASHES, AVAILABLE_MODES, DH_parameters, encryption, unpacking
+from utils import ProtoAlgorithm, AVAILABLE_CIPHERS, AVAILABLE_HASHES, AVAILABLE_MODES, DH_parameters, encryption, unpacking, length_by_cipher, key_derivation
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
@@ -146,8 +146,10 @@ class ClientProtocol(asyncio.Protocol):
         if key is not None:
             logger.debug(f"Server DH_public_key : {key}")
 
-            self.shared_key = self.DH_private_key.exchange(
-                load_pem_public_key(key.encode(), default_backend()))
+            self.shared_key = key_derivation(
+                "SHA512", length_by_cipher[self.current_algorithm.cipher],
+                self.DH_private_key.exchange(
+                    load_pem_public_key(key.encode(), default_backend())))
 
             logger.info(f"Shared Key with DH : {self.shared_key}")
 
@@ -235,16 +237,20 @@ class ClientProtocol(asyncio.Protocol):
             read_size = 16 * 60
             while True:
                 data = f.read(16 * 60)
-
+                
                 algorithm, chiper, mode, synthesis_algorithm = unpacking(
                     self.current_algorithm.packing())
 
-                message['data'] = base64.b64encode(
-                    encryption(data, self.shared_key, chiper, mode,
-                               synthesis_algorithm)).decode()
+                encrypted_data, padding_length, iv = encryption(
+                    data, self.shared_key, chiper, mode)
 
+                message['data'] = base64.b64encode(encrypted_data).decode()
+                message['padding_length'] = padding_length
+                
+                message['iv'] = base64.b64encode(iv).decode()
+                
                 self._send(message)
-
+                print(encrypted_data)
                 if len(data) != read_size:
                     break
 
