@@ -4,8 +4,13 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.asymmetric import dh
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 import binascii
 import pickle
+import random
+
+
 
 AVAILABLE_CIPHERS = ["ChaCha20", "AES", "TripleDES"]
 AVAILABLE_HASHES = ["SHA256", "SHA512", "MD5"]
@@ -100,8 +105,8 @@ def encryption(user_file, encrypted_file, cipher_algorithm, mode, iv, salt):
             str.encode(file_content[padding:padding + block_size]))
     ct += encryptor.finalize()
 
-    symmetric_protocol = Symmetric_protocol(iv, salt, padding_length,
-                                            encryptor.tag if mode == 'GCM' else None, ct)
+    symmetric_protocol = Symmetric_protocol(
+        iv, salt, padding_length, encryptor.tag if mode == 'GCM' else None, ct)
 
     # TODO -> talvez possa ser melhorado
     cryptogram_file = open(encrypted_file, "wb")
@@ -121,7 +126,8 @@ def decryption(encrypted_file, decrypted_file, algorithm, mode):
     else:
         cipher = Cipher(
             algorithm,
-            mode=modes.CBC(iv) if mode == 'CBC' else modes.GCM(iv, tag), #tentar melhorar isto
+            mode=modes.CBC(iv)
+            if mode == 'CBC' else modes.GCM(iv, tag),  #tentar melhorar isto
             backend=default_backend())
 
     decryptor = cipher.decryptor()
@@ -177,3 +183,13 @@ def unpacking(pack_string):
     splitted_string = pack_string.split('_')
     return splitted_string[0], splitted_string[1], splitted_string[
         2], splitted_string[3]
+
+
+def DH_parameters():
+    p = 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF
+    g = 3
+    pn = dh.DHParameterNumbers(p, g)
+    return pn.parameters(default_backend())
+
+
+    
