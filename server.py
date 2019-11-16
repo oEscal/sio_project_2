@@ -6,7 +6,7 @@ import coloredlogs, logging
 import re
 import os
 from aio_tcpserver import tcp_server
-from utils import AVAILABLE_CIPHERS, AVAILABLE_HASHES, AVAILABLE_MODES, ProtoAlgorithm, unpacking, DH_parameters
+from utils import AVAILABLE_CIPHERS, AVAILABLE_HASHES, AVAILABLE_MODES, ProtoAlgorithm, unpacking, DH_parameters, DH_parametersNumbers
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
@@ -111,7 +111,7 @@ class ClientHandler(asyncio.Protocol):
             ret = self.process_close(message)
         elif mtype == 'ALGORITHM_NEGOTIATION':
             ret = self.process_algorithm_negotiation(message)
-        elif mtype == 'DH_PUBLIC_KEY':
+        elif mtype == 'PARAMETERS_AND_DH_PUBLIC_KEY':
             ret = self.process_DH_Public_Key(message)
         else:
             logger.warning("Invalid message type: {}".format(message['type']))
@@ -133,22 +133,26 @@ class ClientHandler(asyncio.Protocol):
 
     def process_DH_Public_Key(self, message: str) -> bool:
         """	
-			Reads client DH_public_key
+			Reads client DH_public_key,p and g parameters
 			Also server creates their own DH_keys and sent public key to server
 		"""
 
         if self.state != STATE_ALGORITHM_ACK:
             return False
 
-
-        key = message.get('key', None)
-        if key is None:
+        data = message.get('data', None)
+        if data is None:
             return False
 
-        logger.debug(f"Client DH_public_key : {key}")
+        logger.debug(f"Client DH_public_key : {data}")
 
         try:
-            parameters = DH_parameters()
+
+            p = data.get('p', 'None')
+            g = data.get('g', 'None')
+            key = data.get('key')
+
+            parameters = DH_parametersNumbers(p, g)
 
             self.DH_private_key = parameters.generate_private_key()
             self.DH_public_key = self.DH_private_key.public_key()
@@ -170,6 +174,7 @@ class ClientHandler(asyncio.Protocol):
 
             logger.info(f"Shared_key with DH : {self.shared_key}")
         except Exception as e:
+            logger.warning(e)
             return False
 
         return True
@@ -181,8 +186,6 @@ class ClientHandler(asyncio.Protocol):
 		:param message: The message to process
 		:return: Boolean indicating the success of the operation
 		"""
-
-        
 
         if self.state != STATE_CONNECT:
             logger.warning("Invalid state. Discarding")
@@ -199,13 +202,12 @@ class ClientHandler(asyncio.Protocol):
                 self.current_algorithm = ProtoAlgorithm(
                     cipher, mode, synthesis_algorithm)
 
-
-                logger.info(f"Process algorithm negotiation: {message}\t Algorithm Accepted")
+                logger.info(
+                    f"Process algorithm negotiation: {message}\t Algorithm Accepted"
+                )
 
                 message = {'type': 'OK'}
                 self.state = STATE_ALGORITHM_ACK
-                
-
 
             else:
                 message = {

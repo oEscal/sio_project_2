@@ -153,7 +153,7 @@ class ClientProtocol(asyncio.Protocol):
 
         self.send_fileName(self.file_name)
 
-        self.state = STATE_OPEN #Ready To send
+        self.state = STATE_OPEN  #Ready To send
 
     def process_DH(self):
 
@@ -163,11 +163,19 @@ class ClientProtocol(asyncio.Protocol):
 
         self.DH_private_key = parameters.generate_private_key()
         self.DH_public_key = self.DH_private_key.public_key()
+        
 
         message = {
-            'type': 'DH_PUBLIC_KEY',
-            'key': self.DH_public_key.public_bytes(
-                Encoding.PEM, PublicFormat.SubjectPublicKeyInfo).decode()
+            'type': 'PARAMETERS_AND_DH_PUBLIC_KEY',
+            'data': {
+                'p':
+                parameters.parameter_numbers().p,
+                'g':
+                parameters.parameter_numbers().g,
+                'key':
+                self.DH_public_key.public_bytes(
+                    Encoding.PEM, PublicFormat.SubjectPublicKeyInfo).decode()
+            }
         }
 
         self._send(message)
