@@ -24,12 +24,12 @@ def main():
 
     algorithm, iv = cipher_params(cipher_algorithm, key)
 
-    encryption("README.md", "encrypted.txt", algorithm, mode, iv, salt)
+    encryption_file("README.md", "encrypted.txt", algorithm, mode, iv, salt)
 
     with open("file_key.bin", 'wb') as file:
         file.write(key)
 
-    decryption("encrypted.txt", "READMEDecrypted.txt", algorithm, mode)
+    decryption_file("encrypted.txt", "READMEDecrypted.txt", algorithm, mode)
 
 
 if __name__ == "__main__":

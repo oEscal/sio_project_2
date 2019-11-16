@@ -11,11 +11,10 @@ import binascii
 import pickle
 import random
 
-
-
 AVAILABLE_CIPHERS = ["ChaCha20", "AES", "TripleDES"]
 AVAILABLE_HASHES = ["SHA256", "SHA512", "MD5"]
 AVAILABLE_MODES = ["CBC", "GCM"]
+length_by_cipher = {'ChaCha20': 32, 'AES': 32, 'TripleDES': 24}
 
 
 def cipher_params(cipher_algorithm, key):
@@ -72,7 +71,51 @@ def symmetric_key_generation(hash_algorithm, key, length, salt_value=None):
     return kdf.derive(str.encode(key)), salt
 
 
-def encryption(user_file, encrypted_file, cipher_algorithm, mode, iv, salt):
+def key_derivation(hash_algorithm, length, key):
+    backend = default_backend()
+    salt = os.urandom(16)
+
+    upper_hash_alg = hash_algorithm.upper()
+    #print(getattr(hashes, upper_hash_alg))
+    return HKDF(algorithm=hashes.SHA512(),
+                length=length,
+                salt=salt,
+                info=b'handshake data',
+                backend=backend).derive(key)
+
+
+def encryption(data, key, cipher_algorithm, mode, synthesis_algorithm):
+
+    key_derived = key_derivation(synthesis_algorithm,
+                                 length_by_cipher[cipher_algorithm], key)
+
+    algorithm, iv = cipher_params(cipher_algorithm, key_derived)
+
+    if iv is None:  #For ChaCha20
+        iv_length = 16
+    else:
+        iv_length = len(iv)
+
+    padding_length = (iv_length - (len(data) % iv_length)) % iv_length
+    data += (padding_length * "\x00").encode()
+
+    if iv is None:  # For ChaCha20
+        cipher = Cipher(algorithm, None, backend=default_backend())
+    else:
+        cipher = Cipher(
+            algorithm,
+            getattr(modes, mode)(
+                iv
+            ),  #verificar erros disto ( ou ter a certeza que o parametro passado é sempre correto)
+            backend=default_backend())
+    
+    encryptor = cipher.encryptor()
+
+    return encryptor.update(data) + encryptor.finalize()
+
+
+def encryption_file(user_file, encrypted_file, cipher_algorithm, mode, iv,
+                    salt):
 
     f = open(user_file, "r")
     with open(user_file, 'r'):
@@ -115,7 +158,7 @@ def encryption(user_file, encrypted_file, cipher_algorithm, mode, iv, salt):
     cryptogram_file.close()
 
 
-def decryption(encrypted_file, decrypted_file, algorithm, mode):
+def decryption_file(encrypted_file, decrypted_file, algorithm, mode):
 
     symmetric_protocol = read_protocol(open(encrypted_file, "rb"))
 
@@ -186,12 +229,12 @@ def unpacking(pack_string):
         2], splitted_string[3]
 
 
-def DH_parameters():    
-    return dh.generate_parameters(generator=2, key_size=1024,backend=default_backend())
+def DH_parameters():
+    return dh.generate_parameters(generator=2,
+                                  key_size=1024,
+                                  backend=default_backend())
 
-def DH_parametersNumbers(p,g):
+
+def DH_parametersNumbers(p, g):
     pn = dh.DHParameterNumbers(p, g)
-    return  pn.parameters(default_backend())
-    
-
-    
+    return pn.parameters(default_backend())

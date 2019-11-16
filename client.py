@@ -5,7 +5,7 @@ import argparse
 import coloredlogs, logging
 import os
 import random
-from utils import ProtoAlgorithm, AVAILABLE_CIPHERS, AVAILABLE_HASHES, AVAILABLE_MODES, DH_parameters
+from utils import ProtoAlgorithm, AVAILABLE_CIPHERS, AVAILABLE_HASHES, AVAILABLE_MODES, DH_parameters, encryption, unpacking
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
@@ -163,7 +163,6 @@ class ClientProtocol(asyncio.Protocol):
 
         self.DH_private_key = parameters.generate_private_key()
         self.DH_public_key = self.DH_private_key.public_key()
-        
 
         message = {
             'type': 'PARAMETERS_AND_DH_PUBLIC_KEY',
@@ -236,7 +235,14 @@ class ClientProtocol(asyncio.Protocol):
             read_size = 16 * 60
             while True:
                 data = f.read(16 * 60)
-                message['data'] = base64.b64encode(data).decode()
+
+                algorithm, chiper, mode, synthesis_algorithm = unpacking(
+                    self.current_algorithm.packing())
+
+                message['data'] = base64.b64encode(
+                    encryption(data, self.shared_key, chiper, mode,
+                               synthesis_algorithm)).decode()
+
                 self._send(message)
 
                 if len(data) != read_size:
