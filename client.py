@@ -149,7 +149,7 @@ class ClientProtocol(asyncio.Protocol):
             self.shared_key = self.DH_private_key.exchange(
                 load_pem_public_key(key.encode(), default_backend()))
 
-            logger.info(f"Shared Key : {self.shared_key}")
+            logger.info(f"Shared Key with DH : {self.shared_key}")
 
         self.send_fileName(self.file_name)
 
