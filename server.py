@@ -7,7 +7,7 @@ import re
 import os
 from aio_tcpserver import tcp_server
 from utils import AVAILABLE_CIPHERS, AVAILABLE_HASHES, AVAILABLE_MODES, ProtoAlgorithm, unpacking, DH_parameters, DH_parametersNumbers,\
-         key_derivation, length_by_cipher, decryption
+         key_derivation, length_by_cipher, decryption,MAC
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
@@ -302,16 +302,25 @@ class ClientHandler(asyncio.Protocol):
 
 
             padding_length = message.get('padding_length', None)
-            iv = message.get('iv','None')
+            iv = message.get('iv',None)
+            MAC_b64 = message.get('MAC',None)
 
-            
-            if padding_length is None or iv is None:
+            if padding_length is None or iv is None or MAC_b64 is None:
                 return False
 
             
             iv = base64.b64decode(iv)
             encrypted_data = base64.b64decode(message['data'])
+            received_MAC =  base64.b64decode(MAC_b64)
             
+            h = MAC(self.shared_key,self.current_algorithm.synthesis_algorithm)
+            h.update(encrypted_data)
+            current_MAC = h.finalize()
+
+            if received_MAC != current_MAC:
+                logger.warning("MAC authentication Failed")
+                return False
+
 
             decrypted_data = base64.b64encode(decryption(encrypted_data, self.shared_key, cipher, mode,padding_length,iv))
             

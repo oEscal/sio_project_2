@@ -1,7 +1,7 @@
 import getpass
 import os
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.backends.openssl.backend import DHBackend
@@ -98,7 +98,7 @@ def encryption(data, key, cipher_algorithm, mode):
 
     padding_length = (iv_length - (len(data) % iv_length)) % iv_length
     data += (padding_length * "\x00").encode()
-    
+
     if iv is None:  # For ChaCha20
         cipher = Cipher(algorithm, None, backend=default_backend())
         iv = algorithm.nonce
@@ -112,18 +112,17 @@ def encryption(data, key, cipher_algorithm, mode):
 
     encryptor = cipher.encryptor()
 
-    
     return encryptor.update(data) + encryptor.finalize(), padding_length, iv
 
 
-def decryption(data, key, cipher_algorithm, mode, padding_length,iv ):
-    
-    cipher_mode = getattr( algorithms, cipher_algorithm)
+def decryption(data, key, cipher_algorithm, mode, padding_length, iv):
+
+    cipher_mode = getattr(algorithms, cipher_algorithm)
     if cipher_algorithm != 'ChaCha20':
         algorithm = cipher_mode(key)
     else:
         algorithm = cipher_mode(key, iv)
-    
+
     if cipher_algorithm == 'ChaCha20':  # For ChaCha20
         cipher = Cipher(algorithm, mode=None, backend=default_backend())
     else:
@@ -135,12 +134,11 @@ def decryption(data, key, cipher_algorithm, mode, padding_length,iv ):
 
     decryptor = cipher.decryptor()
 
-    
     output = decryptor.update(data) + decryptor.finalize()
 
     if padding_length == 0:
         return output
-    
+
     return output[:-padding_length]
 
 
@@ -268,3 +266,8 @@ def DH_parameters():
 def DH_parametersNumbers(p, g):
     pn = dh.DHParameterNumbers(p, g)
     return pn.parameters(default_backend())
+
+
+def MAC(key, synthesis_algorithm):
+    picked_hash = getattr(hashes, synthesis_algorithm)
+    return hmac.HMAC(key, picked_hash(), backend=default_backend())

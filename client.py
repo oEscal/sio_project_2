@@ -5,7 +5,8 @@ import argparse
 import coloredlogs, logging
 import os
 import random
-from utils import ProtoAlgorithm, AVAILABLE_CIPHERS, AVAILABLE_HASHES, AVAILABLE_MODES, DH_parameters, encryption, unpacking, length_by_cipher, key_derivation
+from utils import ProtoAlgorithm, AVAILABLE_CIPHERS, AVAILABLE_HASHES, AVAILABLE_MODES, DH_parameters, encryption, unpacking, \
+    length_by_cipher, key_derivation,MAC
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
@@ -237,20 +238,31 @@ class ClientProtocol(asyncio.Protocol):
             read_size = 16 * 60
             while True:
                 data = f.read(16 * 60)
-                
+
                 algorithm, chiper, mode, synthesis_algorithm = unpacking(
                     self.current_algorithm.packing())
 
                 encrypted_data, padding_length, iv = encryption(
                     data, self.shared_key, chiper, mode)
 
-                message['data'] = base64.b64encode(encrypted_data).decode()
+                
                 message['padding_length'] = padding_length
-                
+
                 message['iv'] = base64.b64encode(iv).decode()
+
+                h = MAC(self.shared_key,
+                        self.current_algorithm.synthesis_algorithm)
+                h.update(encrypted_data)
+
+                message['MAC'] = base64.b64encode(h.finalize()).decode()
+
+                #Testar o MAC 
+                encrypted_data+="\x00".encode()
                 
+                message['data'] = base64.b64encode(encrypted_data).decode()
+
                 self._send(message)
-                print(encrypted_data)
+
                 if len(data) != read_size:
                     break
 
