@@ -5,16 +5,8 @@ import argparse
 import coloredlogs, logging
 import os
 import random
-from utils import (
-    ProtoAlgorithm,
-    DH_parameters,
-    encryption,
-    unpacking,
-    length_by_cipher,
-    key_derivation,
-    MAC,
-    test_compatibility
-)
+from utils import ProtoAlgorithm, DH_parameters, encryption, unpacking, \
+    length_by_cipher, key_derivation, MAC, test_compatibility
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
@@ -50,9 +42,7 @@ class ClientProtocol(asyncio.Protocol):
         self.DH_private_key = None
         self.DH_public_key = None
         self.shared_key = None
-        self.AVAILABLE_CIPHERS = [
-            "ChaCha20", "AES", "TripleDES", "Blowfish", "ARC4"
-        ]
+        self.AVAILABLE_CIPHERS = ["ChaCha20", "AES", "TripleDES", "Blowfish", "ARC4"]
         self.AVAILABLE_HASHES = ["SHA256", "SHA512", "MD5"]
         self.AVAILABLE_MODES = ["CBC", "GCM", "ECB"]
         self.random = random
@@ -71,7 +61,7 @@ class ClientProtocol(asyncio.Protocol):
 
         logger.debug("Connected to Server")
 
-        # ALGORITHMS NEGOTIATION
+        # send a list of all algorithms that 
         self.send_algorithm()
 
     def data_received(self, data: str) -> None:
@@ -121,67 +111,39 @@ class ClientProtocol(asyncio.Protocol):
             return
 
         mtype = message.get("type", None)
-
         if mtype == "OK":  # Server replied OK. We can advance the state
             if self.state == STATE_ALGORITHM_NEGOTIATION:
-                logger.info("Algorithm acepted from server")
+                logger.info("Algorithm accepted from server")
                 self.process_DH()
-
             elif self.state == STATE_OPEN:
                 self.send_file(self.file_name)
-
             elif self.state == STATE_DATA:  # Got an OK during a message transfer.
                 # Reserved for future use
                 pass
             else:
                 logger.warning("Ignoring message from server")
             return
-
         elif mtype == 'AVAILABLE_ALGORITHMS':
             if self.state == STATE_ALGORITHM_NEGOTIATION:
                 self.chose_algorithm(message)
                 return
-            else:
-                logger.warning("Invalid state")
-
+            logger.warning("Invalid state")
         elif mtype == "DH_PUBLIC_KEY":
             if self.state == STATE_DH_EXCHANGE_KEYS:
                 self.get_server_DH_key(message)
                 return
-            else:
-                logger.warning("Invalid state")
-
+            logger.warning("Invalid state")
         elif mtype == "ERROR":
-            logger.warning("Got error from server: {}".format(
-                message.get("message", None)))
+            logger.warning("Got error from server: {}".format(message.get("message", None)))
         else:
             logger.warning("Invalid message type")
 
         self.transport.close()
         self.loop.stop()
 
-    def get_server_DH_key(self, message):
-
-        key = message.get("key", None)
-        if key is not None:
-            logger.debug(f"Server DH_public_key : {key}")
-
-            self.shared_key = key_derivation(
-                self.current_algorithm.synthesis_algorithm,
-                length_by_cipher[self.current_algorithm.cipher],
-                self.DH_private_key.exchange(
-                    load_pem_public_key(key.encode(), default_backend())),
-            )
-
-            logger.info(f"Shared Key with DH : {self.shared_key}")
-
-        self.send_fileName(self.file_name)
-
-        self.state = STATE_OPEN  # Ready To send
 
     def process_DH(self):
-
-        logger.info("Initializating DH")
+        logger.info("Initializing DH")
 
         parameters = DH_parameters()
 
@@ -205,18 +167,12 @@ class ClientProtocol(asyncio.Protocol):
 
         self.state = STATE_DH_EXCHANGE_KEYS
 
-    def send_fileName(self, fileName):
-        message = {"type": "OPEN", "file_name": self.file_name}
-        self._send(message)
-        self.state = STATE_OPEN
-
     def chose_algorithm(self, message):
-        """Client pick a algorithm and sends to server"""
+        """Client pick an algorithm and sends to server"""
 
         algorithms = message.get('data', None)
 
         if algorithms is not None:
-
             ciphers = algorithms.get('ciphers', None)
             modes = algorithms.get('modes', None)
             hashes = algorithms.get('hashes', None)
@@ -233,7 +189,7 @@ class ClientProtocol(asyncio.Protocol):
                 mode = random.SystemRandom().choice(modes)
                 hash_al = random.SystemRandom().choice(hashes)
                 
-                if test_compatibility(cipher,mode):
+                if test_compatibility(cipher, mode):
                     break
                 else:
                     if len(modes) == 1:
@@ -243,20 +199,41 @@ class ClientProtocol(asyncio.Protocol):
                         return
                     modes.remove(mode)
                 
-
-
             self.current_algorithm = ProtoAlgorithm(cipher, mode, hash_al)
 
             message = {
                 'type': 'PICKED_ALGORITHM',
                 'data': self.current_algorithm.packing()
             }
-
             self._send(message)
-
         else:
+            logger.warning("No algorithms received!")
             self.transport.close()
             self.loop.stop()
+
+    def get_server_DH_key(self, message):
+
+        key = message.get("key", None)
+        if key is not None:
+            logger.debug(f"Server DH_public_key : {key}")
+
+            self.shared_key = key_derivation(
+                self.current_algorithm.synthesis_algorithm,
+                length_by_cipher[self.current_algorithm.cipher],
+                self.DH_private_key.exchange(
+                    load_pem_public_key(key.encode(), default_backend())),
+            )
+
+            logger.info(f"Shared Key with DH : {self.shared_key}")
+
+        self.send_fileName(self.file_name)
+
+        self.state = STATE_OPEN  # Ready To send
+
+    def send_fileName(self, fileName):
+        message = {"type": "OPEN", "file_name": self.file_name}
+        self._send(message)
+        self.state = STATE_OPEN
 
     def send_algorithm(self):
         """

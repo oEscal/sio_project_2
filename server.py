@@ -6,16 +6,8 @@ import coloredlogs, logging
 import re
 import os
 from aio_tcpserver import tcp_server
-from utils import (
-    ProtoAlgorithm,
-    unpacking,
-    DH_parameters,
-    DH_parametersNumbers,
-    key_derivation,
-    length_by_cipher,
-    decryption,
-    MAC,
-)
+from utils import ProtoAlgorithm, unpacking, DH_parameters, DH_parametersNumbers, \
+    key_derivation, length_by_cipher, decryption, MAC
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
@@ -223,53 +215,6 @@ class ClientHandler(asyncio.Protocol):
 
         return True
 
-    def process_algorithm_negotiation(self, message: str) -> bool:
-        """
-		Processes an algorithm negotiation from the client
-
-		:param message: The message to process
-		:return: Boolean indicating the success of the operation
-		"""
-
-        if self.state != STATE_CONNECT:
-            logger.warning("Invalid state. Discarding")
-            return False
-
-        client_algorithms = message.get("data", None)
-        logger.info(f"Client algorithms : {client_algorithms}")
-
-        client_ciphers = client_algorithms.get('ciphers', None)
-        client_modes = client_algorithms.get('modes', None)
-        client_hashes = client_algorithms.get('hashes', None)
-
-        if client_ciphers is None and client_modes is None and client_hashes is None:
-            logger.warning("Invalid algorithm request!")
-            return False
-
-        common_ciphers = list(
-            set(client_ciphers).intersection(set(self.AVAILABLE_CIPHERS)))
-        common_modes = list(
-            set(client_modes).intersection(set(self.AVAILABLE_MODES)))
-        common_hashes = list(
-            set(client_hashes).intersection(set(self.AVAILABLE_HASHES)))
-
-        if common_ciphers == [] or common_modes == [] or common_hashes == []:
-            logger.warning("Invalid algorithm request!")
-            return False
-
-        message = {
-            'type': 'AVAILABLE_ALGORITHMS',
-            'data': {
-                'ciphers': common_ciphers,
-                'modes': common_modes,
-                'hashes': common_hashes
-            }
-        }
-
-        self._send(message)
-        self.state = STATE_ALGORITHMS
-        return True
-
     def process_open(self, message: str) -> bool:
         """
 		Processes an OPEN message from the client
@@ -409,6 +354,53 @@ class ClientHandler(asyncio.Protocol):
 
         self.state = STATE_CLOSE
 
+        return True
+
+    def process_algorithm_negotiation(self, message: str) -> bool:
+        """
+		Processes an algorithm negotiation from the client
+
+		:param message: The message to process
+		:return: Boolean indicating the success of the operation
+		"""
+
+        if self.state != STATE_CONNECT:
+            logger.warning("Invalid state. Discarding")
+            return False
+
+        client_algorithms = message.get("data", None)
+        logger.info(f"Client algorithms : {client_algorithms}")
+
+        client_ciphers = client_algorithms.get('ciphers', None)
+        client_modes = client_algorithms.get('modes', None)
+        client_hashes = client_algorithms.get('hashes', None)
+
+        if client_ciphers is None or client_modes is None or client_hashes is None:
+            logger.warning("Invalid algorithm request!")
+            return False
+
+        common_ciphers = list(
+            set(client_ciphers).intersection(set(self.AVAILABLE_CIPHERS)))
+        common_modes = list(
+            set(client_modes).intersection(set(self.AVAILABLE_MODES)))
+        common_hashes = list(
+            set(client_hashes).intersection(set(self.AVAILABLE_HASHES)))
+
+        if common_ciphers == [] or common_modes == [] or common_hashes == []:
+            logger.warning("Invalid algorithm request!")
+            return False
+
+        message = {
+            'type': 'AVAILABLE_ALGORITHMS',
+            'data': {
+                'ciphers': common_ciphers,
+                'modes': common_modes,
+                'hashes': common_hashes
+            }
+        }
+
+        self._send(message)
+        self.state = STATE_ALGORITHMS
         return True
 
     def _send(self, message: str) -> None:

@@ -17,7 +17,7 @@ length_by_cipher = {"ChaCha20": 32, "AES": 32, "TripleDES": 24}
 def test_compatibility(cipher, mode):
     """Check if default_backend() suport cipher and mode combination"""
 
-    chiper_obj = cipher_params(cipher, os.urandom(length_by_cipher[cipher]))[0]  #need to be object , not interface , to validate_for_algorithm work
+    chiper_obj = cipher_params(cipher, os.urandom(length_by_cipher[cipher]))[0]  #need to be object, not interface, to validate_for_algorithm work
     if chiper_obj.name == "ChaCha20":
         return True
     mode_object = None
