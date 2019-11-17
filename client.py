@@ -13,7 +13,6 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
-
 logger = logging.getLogger("root")
 
 
@@ -43,7 +42,9 @@ class ClientProtocol(asyncio.Protocol):
         self.synthesis = synthesis
 
         # algorithms
-        self.AVAILABLE_CIPHERS = ["ChaCha20", "AES", "TripleDES", "Blowfish", "ARC4"]
+        self.AVAILABLE_CIPHERS = [
+            "ChaCha20", "AES", "TripleDES", "Blowfish", "ARC4"
+        ]
         self.AVAILABLE_HASHES = ["SHA256", "SHA512", "MD5"]
         self.AVAILABLE_MODES = ["CBC", "GCM", "ECB"]
 
@@ -58,7 +59,7 @@ class ClientProtocol(asyncio.Protocol):
 
         logger.debug("Connected to Server")
 
-        # send a list of all algorithms that 
+        # send a list of all algorithms
         self.send_algorithm()
 
     def data_received(self, data: str) -> None:
@@ -131,13 +132,13 @@ class ClientProtocol(asyncio.Protocol):
                 return
             logger.warning("Invalid state")
         elif mtype == "ERROR":
-            logger.warning("Got error from server: {}".format(message.get("message", None)))
+            logger.warning("Got error from server: {}".format(
+                message.get("message", None)))
         else:
             logger.warning("Invalid message type")
 
         self.transport.close()
         self.loop.stop()
-
 
     def process_DH(self):
         logger.info("Initializing DH")
@@ -150,9 +151,12 @@ class ClientProtocol(asyncio.Protocol):
         message = {
             "type": "PARAMETERS_AND_DH_PUBLIC_KEY",
             "data": {
-                "p": parameters.parameter_numbers().p,
-                "g": parameters.parameter_numbers().g,
-                "key": self.dh_public_key.public_bytes(
+                "p":
+                parameters.parameter_numbers().p,
+                "g":
+                parameters.parameter_numbers().g,
+                "key":
+                self.dh_public_key.public_bytes(
                     Encoding.PEM, PublicFormat.SubjectPublicKeyInfo).decode(),
             },
         }
@@ -181,7 +185,7 @@ class ClientProtocol(asyncio.Protocol):
                 cipher = random.SystemRandom().choice(ciphers)
                 mode = random.SystemRandom().choice(modes)
                 hash_al = random.SystemRandom().choice(hashes)
-                
+
                 if test_compatibility(cipher, mode):
                     break
                 else:
@@ -191,9 +195,9 @@ class ClientProtocol(asyncio.Protocol):
                         logger.warning("Cipher and mode are incompatibles")
                         return
                     modes.remove(mode)
-                
-            self.current_algorithm = ProtoAlgorithm(cipher, mode, hash_al)
 
+            self.current_algorithm = ProtoAlgorithm(cipher, mode, hash_al)
+            logger.info(f"Chosen Algorithm {str(self.current_algorithm)}")
             message = {
                 'type': 'PICKED_ALGORITHM',
                 'data': self.current_algorithm.packing()
@@ -219,11 +223,12 @@ class ClientProtocol(asyncio.Protocol):
 
             logger.info(f"Shared Key with DH : {self.shared_key}")
 
-        self.send_fileName(self.file_name)
+        self.send_fileName()
 
         self.state = STATE_OPEN  # Ready To send
 
-    def send_fileName(self, fileName):
+    def send_fileName(self):
+        logger.info(f"Sending file Name  to Server : {self.file_name}")
         message = {"type": "OPEN", "file_name": self.file_name}
         self._send(message)
         self.state = STATE_OPEN
@@ -277,6 +282,8 @@ class ClientProtocol(asyncio.Protocol):
         :param file_name: File to send
         :return:  None
         """
+
+        logger.info("Sending file to Server...")
         status = True
         with open(file_name, "rb") as f:
             message = {"type": "DATA", "data": None}
@@ -291,9 +298,9 @@ class ClientProtocol(asyncio.Protocol):
                 try:
                     encrypted_data, padding_length, iv, tag = encryption(
                         data, self.shared_key, chiper, mode)
-                except Exception as e:
+                except asyncio.EX as e:
                     logger.warning("Cipher and Mode are incompatibles"
-                                   )  #GCM E 3DES incopativeis
+                                   )  #GCM E 3DES incompativeis
                     self.transport.close()
                     self.loop.stop()
                     status = False
@@ -313,7 +320,9 @@ class ClientProtocol(asyncio.Protocol):
                 message["MAC"] = base64.b64encode(h.finalize()).decode()
                 message["data"] = base64.b64encode(encrypted_data).decode()
 
+                
                 self._send(message)
+                
 
                 if len(data) != read_size:
                     break
@@ -377,13 +386,13 @@ def main():
                         type=str,
                         dest="mode",
                         default="CBC",
-                        help="Mode algorithm")
+                        help="Mode algorithm (default CBC)")
     parser.add_argument(
         "--synthesis",
         type=str,
         dest="synthesis",
         default="SHA512",
-        help="Synthesis algorithm",
+        help="Synthesis algorithm (default SHA512)",
     )
 
     args = parser.parse_args()

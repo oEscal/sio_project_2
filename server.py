@@ -38,7 +38,6 @@ class ClientHandler(asyncio.Protocol):
         self.dh_private_key = None
         self.dh_public_key = None
         self.shared_key = None
-        self.salt = None
 
         # algorithms
         self.AVAILABLE_CIPHERS = ["ChaCha20", "AES", "TripleDES"]
@@ -151,7 +150,7 @@ class ClientHandler(asyncio.Protocol):
         key_algorithm, cipher, mode, hash_al = unpacking(algorithm)
 
         self.current_algorithm = ProtoAlgorithm(cipher, mode, hash_al)
-        logger.info(f"Picked algorithm {self.current_algorithm}")
+        logger.info(f"Algorithm picked by client: {self.current_algorithm}")
 
         message = {'type': 'OK'}
 
@@ -216,7 +215,7 @@ class ClientHandler(asyncio.Protocol):
 		:param message: The message to process
 		:return: Boolean indicating the success of the operation
 		"""
-        logger.debug("Process Open: {}".format(message))
+        logger.info("Process Open: {}".format(message))
 
         if self.state != STATE_DH_EXCHANGE_KEYS:
             logger.warning("Invalid state. Discarding")
@@ -258,7 +257,7 @@ class ClientHandler(asyncio.Protocol):
 		:param message: The message to process
 		:return: Boolean indicating the success of the operation
 		"""
-        logger.debug("Process Data: {}".format(message))
+        logger.info("Processing Data...")
 
         if self.state == STATE_OPEN:
             self.state = STATE_DATA
@@ -297,6 +296,10 @@ class ClientHandler(asyncio.Protocol):
 
             h = MAC(self.shared_key,
                     self.current_algorithm.synthesis_algorithm)
+
+            #TEST MAC
+            encrypted_data+=('\x00').encode()
+
             h.update(encrypted_data)
             current_MAC = h.finalize()
 
@@ -338,7 +341,7 @@ class ClientHandler(asyncio.Protocol):
 		:param message: The message to process
 		:return: Boolean indicating the success of the operation
 		"""
-        logger.debug("Process Close: {}".format(message))
+        logger.info("Process Close: {}".format(message))
 
         self.transport.close()
         if self.file is not None:
@@ -437,6 +440,7 @@ def main():
         default="files",
         help="Where to store files (default=./files)",
     )
+
 
     args = parser.parse_args()
     STORAGE_DIR = os.path.abspath(args.storage_dir)
