@@ -13,6 +13,7 @@ from utils import (
     length_by_cipher,
     key_derivation,
     MAC,
+    test_compatibility
 )
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.backends import default_backend
@@ -33,7 +34,6 @@ class ClientProtocol(asyncio.Protocol):
     """
     Client that handles a single client
     """
-
     def __init__(self, file_name, loop, random, cipher, mode, synthesis):
         """
         Default constructor
@@ -50,7 +50,9 @@ class ClientProtocol(asyncio.Protocol):
         self.DH_private_key = None
         self.DH_public_key = None
         self.shared_key = None
-        self.AVAILABLE_CIPHERS = ["ChaCha20", "AES", "TripleDES", "Blowfish", "ARC4"]
+        self.AVAILABLE_CIPHERS = [
+            "ChaCha20", "AES", "TripleDES", "Blowfish", "ARC4"
+        ]
         self.AVAILABLE_HASHES = ["SHA256", "SHA512", "MD5"]
         self.AVAILABLE_MODES = ["CBC", "GCM", "ECB"]
         self.random = random
@@ -89,15 +91,15 @@ class ClientProtocol(asyncio.Protocol):
         idx = self.buffer.find("\r\n")
 
         while idx >= 0:  # While there are separators
-            frame = self.buffer[: idx + 2].strip()  # Extract the JSON object
+            frame = self.buffer[:idx + 2].strip()  # Extract the JSON object
             self.buffer = self.buffer[
-                idx + 2 :
-            ]  # Removes the JSON object from the buffer
+                idx + 2:]  # Removes the JSON object from the buffer
 
             self.on_frame(frame)  # Process the frame
             idx = self.buffer.find("\r\n")
 
-        if len(self.buffer) > 4096 * 1024 * 1024:  # If buffer is larger than 4M
+        if len(self.buffer
+               ) > 4096 * 1024 * 1024:  # If buffer is larger than 4M
             logger.warning("Buffer to large")
             self.buffer = ""
             self.transport.close()
@@ -110,7 +112,7 @@ class ClientProtocol(asyncio.Protocol):
         :return:
         """
 
-        # logger.debug("Frame: {}".format(frame))
+        #logger.debug("Frame: {}".format(frame))
         try:
             message = json.loads(frame)
         except:
@@ -135,6 +137,13 @@ class ClientProtocol(asyncio.Protocol):
                 logger.warning("Ignoring message from server")
             return
 
+        elif mtype == 'AVAILABLE_ALGORITHMS':
+            if self.state == STATE_ALGORITHM_NEGOTIATION:
+                self.chose_algorithm(message)
+                return
+            else:
+                logger.warning("Invalid state")
+
         elif mtype == "DH_PUBLIC_KEY":
             if self.state == STATE_DH_EXCHANGE_KEYS:
                 self.get_server_DH_key(message)
@@ -143,9 +152,8 @@ class ClientProtocol(asyncio.Protocol):
                 logger.warning("Invalid state")
 
         elif mtype == "ERROR":
-            logger.warning(
-                "Got error from server: {}".format(message.get("message", None))
-            )
+            logger.warning("Got error from server: {}".format(
+                message.get("message", None)))
         else:
             logger.warning("Invalid message type")
 
@@ -162,8 +170,7 @@ class ClientProtocol(asyncio.Protocol):
                 self.current_algorithm.synthesis_algorithm,
                 length_by_cipher[self.current_algorithm.cipher],
                 self.DH_private_key.exchange(
-                    load_pem_public_key(key.encode(), default_backend())
-                ),
+                    load_pem_public_key(key.encode(), default_backend())),
             )
 
             logger.info(f"Shared Key with DH : {self.shared_key}")
@@ -184,11 +191,13 @@ class ClientProtocol(asyncio.Protocol):
         message = {
             "type": "PARAMETERS_AND_DH_PUBLIC_KEY",
             "data": {
-                "p": parameters.parameter_numbers().p,
-                "g": parameters.parameter_numbers().g,
-                "key": self.DH_public_key.public_bytes(
-                    Encoding.PEM, PublicFormat.SubjectPublicKeyInfo
-                ).decode(),
+                "p":
+                parameters.parameter_numbers().p,
+                "g":
+                parameters.parameter_numbers().g,
+                "key":
+                self.DH_public_key.public_bytes(
+                    Encoding.PEM, PublicFormat.SubjectPublicKeyInfo).decode(),
             },
         }
 
@@ -200,6 +209,54 @@ class ClientProtocol(asyncio.Protocol):
         message = {"type": "OPEN", "file_name": self.file_name}
         self._send(message)
         self.state = STATE_OPEN
+
+    def chose_algorithm(self, message):
+        """Client pick a algorithm and sends to server"""
+
+        algorithms = message.get('data', None)
+
+        if algorithms is not None:
+
+            ciphers = algorithms.get('ciphers', None)
+            modes = algorithms.get('modes', None)
+            hashes = algorithms.get('hashes', None)
+
+            logger.info(f"Algorithms implemented by server : {message}")
+
+            if ciphers is None or modes is None or hashes is None:
+                logger.debug("Invalid state")
+                self.transport.close()
+                self.loop.stop()
+
+            while True:
+                cipher = random.SystemRandom().choice(ciphers)
+                mode = random.SystemRandom().choice(modes)
+                hash_al = random.SystemRandom().choice(hashes)
+                
+                if test_compatibility(cipher,mode):
+                    break
+                else:
+                    if len(modes) == 1:
+                        self.transport.close()
+                        self.loop.stop()
+                        logger.warning("Cipher and mode are incompatibles")
+                        return
+                    modes.remove(mode)
+                
+
+
+            self.current_algorithm = ProtoAlgorithm(cipher, mode, hash_al)
+
+            message = {
+                'type': 'PICKED_ALGORITHM',
+                'data': self.current_algorithm.packing()
+            }
+
+            self._send(message)
+
+        else:
+            self.transport.close()
+            self.loop.stop()
 
     def send_algorithm(self):
         """
@@ -214,24 +271,23 @@ class ClientProtocol(asyncio.Protocol):
 
         self.state = STATE_ALGORITHM_NEGOTIATION
 
+        message = {"type": "ALGORITHM_NEGOTIATION"}
+
         if self.random:
-            self.current_algorithm = ProtoAlgorithm(
-                random.SystemRandom().choice(self.AVAILABLE_CIPHERS),
-                random.SystemRandom().choice(self.AVAILABLE_MODES),
-                random.SystemRandom().choice(self.AVAILABLE_HASHES),
-            )
+            message['data'] = {
+                'ciphers': self.AVAILABLE_CIPHERS,
+                'modes': self.AVAILABLE_MODES,
+                'hashes': self.AVAILABLE_HASHES
+            }
         else:
-            self.current_algorithm = ProtoAlgorithm(
-                self.cipher, self.mode, self.synthesis
-            )
+            message['data'] = {
+                'ciphers': [self.cipher],
+                'modes': [self.mode],
+                'hashes': [self.synthesis]
+            }
 
-        message = {
-            "type": "ALGORITHM_NEGOTIATION",
-            "data": self.current_algorithm.packing(),
-        }
-
-        logger.debug("Sending to server Algorithm Choice")
-        logger.info(f"Choosen algorithm: {message['data']}")
+        logger.debug("Sending to server client algorithms")
+        logger.info(f"Client algorithms: {message['data']}")
 
         self._send(message)
 
@@ -251,7 +307,7 @@ class ClientProtocol(asyncio.Protocol):
         :param file_name: File to send
         :return:  None
         """
-
+        status = True
         with open(file_name, "rb") as f:
             message = {"type": "DATA", "data": None}
             read_size = 16 * 60
@@ -262,10 +318,16 @@ class ClientProtocol(asyncio.Protocol):
                     self.current_algorithm.cipher,
                     self.current_algorithm.mode,
                 )
-
-                encrypted_data, padding_length, iv, tag = encryption(
-                    data, self.shared_key, chiper, mode
-                )
+                try:
+                    encrypted_data, padding_length, iv, tag = encryption(
+                        data, self.shared_key, chiper, mode)
+                except Exception as e:
+                    logger.warning("Cipher and Mode are incompatibles"
+                                   )  #GCM E 3DES incopativeis
+                    self.transport.close()
+                    self.loop.stop()
+                    status = False
+                    break
 
                 message["padding_length"] = padding_length
 
@@ -274,7 +336,8 @@ class ClientProtocol(asyncio.Protocol):
                 if tag is not None:
                     message["tag"] = base64.b64encode(tag).decode()
 
-                h = MAC(self.shared_key, self.current_algorithm.synthesis_algorithm)
+                h = MAC(self.shared_key,
+                        self.current_algorithm.synthesis_algorithm)
                 h.update(encrypted_data)
 
                 message["MAC"] = base64.b64encode(h.finalize()).decode()
@@ -288,10 +351,10 @@ class ClientProtocol(asyncio.Protocol):
 
                 if len(data) != read_size:
                     break
-
-            self._send({"type": "CLOSE"})
-            logger.info("File transferred. Closing transport")
-            self.transport.close()
+            if status:
+                self._send({"type": "CLOSE"})
+                logger.info("File transferred. Closing transport")
+                self.transport.close()
 
     def _send(self, message: str) -> None:
         """
@@ -307,9 +370,11 @@ class ClientProtocol(asyncio.Protocol):
 
 def main():
     parser = argparse.ArgumentParser(description="Sends files to servers.")
-    parser.add_argument(
-        "-v", action="count", dest="verbose", help="Shows debug messages", default=0
-    )
+    parser.add_argument("-v",
+                        action="count",
+                        dest="verbose",
+                        help="Shows debug messages",
+                        default=0)
     parser.add_argument(
         "-s",
         type=str,
@@ -342,9 +407,11 @@ def main():
         default="TripleDES",
         help="Cipher algorithm",
     )
-    parser.add_argument(
-        "--mode", type=str, dest="mode", default="CBC", help="Mode algorithm"
-    )
+    parser.add_argument("--mode",
+                        type=str,
+                        dest="mode",
+                        default="CBC",
+                        help="Mode algorithm")
     parser.add_argument(
         "--synthesis",
         type=str,
@@ -362,15 +429,13 @@ def main():
     coloredlogs.install(level)
     logger.setLevel(level)
 
-    logger.info(
-        "Sending file: {} to {}:{} LogLevel: {}".format(file_name, server, port, level)
-    )
+    logger.info("Sending file: {} to {}:{} LogLevel: {}".format(
+        file_name, server, port, level))
 
     loop = asyncio.get_event_loop()
     coro = loop.create_connection(
-        lambda: ClientProtocol(
-            file_name, loop, args.random, args.cipher, args.mode, args.synthesis
-        ),
+        lambda: ClientProtocol(file_name, loop, args.random, args.cipher, args.
+                               mode, args.synthesis),
         server,
         port,
     )

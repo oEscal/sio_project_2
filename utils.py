@@ -14,6 +14,23 @@ import random
 length_by_cipher = {"ChaCha20": 32, "AES": 32, "TripleDES": 24}
 
 
+def test_compatibility(cipher, mode):
+    """Check if default_backend() suport cipher and mode combination"""
+
+    chiper_obj = cipher_params(cipher, os.urandom(length_by_cipher[cipher]))[0]  #need to be object , not interface , to validate_for_algorithm work
+    if chiper_obj.name == "ChaCha20":
+        return True
+    mode_object = None
+    if mode == 'CBC':
+        mode_object = modes.CBC(os.urandom(16))
+    elif mode == 'GCM':
+        mode_object = modes.GCM(os.urandom(16), os.urandom(16))
+    else:
+        return False
+
+    return default_backend().cipher_supported(chiper_obj, mode_object)
+
+
 def cipher_params(cipher_algorithm, key):
 
     algorithm = None
@@ -67,7 +84,9 @@ def encryption(data, key, cipher_algorithm, mode):
         iv = algorithm.nonce
         is_cha = True
     else:
-        cipher = Cipher(algorithm, getattr(modes, mode)(iv), backend=default_backend())
+        cipher = Cipher(algorithm,
+                        getattr(modes, mode)(iv),
+                        backend=default_backend())
 
     encryptor = cipher.encryptor()
 
@@ -93,8 +112,7 @@ def decryption(data, key, cipher_algorithm, mode, padding_length, iv, tag):
         cipher = Cipher(
             algorithm,
             mode=modes.CBC(iv)
-            if mode == "CBC"
-            else modes.GCM(iv, tag),  # tentar melhorar isto
+            if mode == "CBC" else modes.GCM(iv, tag),  # tentar melhorar isto
             backend=default_backend(),
         )
 
@@ -119,7 +137,7 @@ class ProtoAlgorithm:
         return f"{self.algorithm}_{self.cipher}_{self.mode}_{self.synthesis_algorithm}"
 
     def __str__(self):
-        return self.packing().replace("_", "\t")
+        return self.packing()
 
 
 def unpacking(pack_string):
@@ -133,7 +151,9 @@ def unpacking(pack_string):
 
 
 def DH_parameters():
-    return dh.generate_parameters(generator=2, key_size=1024, backend=default_backend())
+    return dh.generate_parameters(generator=2,
+                                  key_size=1024,
+                                  backend=default_backend())
 
 
 def DH_parametersNumbers(p, g):

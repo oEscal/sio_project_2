@@ -26,7 +26,7 @@ STATE_CONNECT = 0
 STATE_OPEN = 1
 STATE_DATA = 2
 STATE_CLOSE = 3
-STATE_KEY = 4
+STATE_ALGORITHMS = 4
 STATE_ALGORITHM_ACK = 5
 STATE_DH_EXCHANGE_KEYS = 6
 
@@ -85,15 +85,15 @@ class ClientHandler(asyncio.Protocol):
         idx = self.buffer.find("\r\n")
 
         while idx >= 0:  # While there are separators
-            frame = self.buffer[: idx + 2].strip()  # Extract the JSON object
+            frame = self.buffer[:idx + 2].strip()  # Extract the JSON object
             self.buffer = self.buffer[
-                idx + 2 :
-            ]  # Removes the JSON object from the buffer
+                idx + 2:]  # Removes the JSON object from the buffer
 
             self.on_frame(frame)  # Process the frame
             idx = self.buffer.find("\r\n")
 
-        if len(self.buffer) > 4096 * 1024 * 1024:  # If buffer is larger than 4M
+        if len(self.buffer
+               ) > 4096 * 1024 * 1024:  # If buffer is larger than 4M
             logger.warning("Buffer to large")
             self.buffer = ""
             self.transport.close()
@@ -126,6 +126,8 @@ class ClientHandler(asyncio.Protocol):
             ret = self.process_algorithm_negotiation(message)
         elif mtype == "PARAMETERS_AND_DH_PUBLIC_KEY":
             ret = self.process_DH_Public_Key(message)
+        elif mtype == "PICKED_ALGORITHM":
+            ret = self.process_client_algorithm_pick(message)
         else:
             logger.warning("Invalid message type: {}".format(message["type"]))
             ret = False
@@ -143,6 +145,31 @@ class ClientHandler(asyncio.Protocol):
 
             self.state = STATE_CLOSE
             self.transport.close()
+
+    def process_client_algorithm_pick(self, message: str) -> bool:
+        """
+            Reads client algorithm pick
+        """
+        if self.state != STATE_ALGORITHMS:
+            logger.warning("Invalid State")
+            return False
+
+        algorithm = message.get('data', None)
+        if algorithm is None:
+            logger.warning("Invalid algorithm")
+            return False
+
+        key_algorithm, cipher, mode, hash_al = unpacking(algorithm)
+
+        self.current_algorithm = ProtoAlgorithm(cipher, mode, hash_al)
+        logger.info(f"Picked algorithm {self.current_algorithm}")
+
+        message = {'type': 'OK'}
+
+        self._send(message)
+
+        self.state = STATE_ALGORITHM_ACK
+        return True
 
     def process_DH_Public_Key(self, message: str) -> bool:
         """	
@@ -171,10 +198,11 @@ class ClientHandler(asyncio.Protocol):
             self.DH_public_key = self.DH_private_key.public_key()
 
             message = {
-                "type": "DH_PUBLIC_KEY",
-                "key": self.DH_public_key.public_bytes(
-                    Encoding.PEM, PublicFormat.SubjectPublicKeyInfo
-                ).decode(),
+                "type":
+                "DH_PUBLIC_KEY",
+                "key":
+                self.DH_public_key.public_bytes(
+                    Encoding.PEM, PublicFormat.SubjectPublicKeyInfo).decode(),
             }
 
             self._send(message)
@@ -185,8 +213,7 @@ class ClientHandler(asyncio.Protocol):
                 self.current_algorithm.synthesis_algorithm,
                 length_by_cipher[self.current_algorithm.cipher],
                 self.DH_private_key.exchange(
-                    load_pem_public_key(key.encode(), default_backend())
-                ),
+                    load_pem_public_key(key.encode(), default_backend())),
             )
 
             logger.info(f"Shared_key with DH : {self.shared_key}")
@@ -208,32 +235,40 @@ class ClientHandler(asyncio.Protocol):
             logger.warning("Invalid state. Discarding")
             return False
 
-        chosen_algorithm = message.get("data", None)
+        client_algorithms = message.get("data", None)
+        logger.info(f"Client algorithms : {client_algorithms}")
 
-        if chosen_algorithm is not None:
-            algorithm, cipher, mode, synthesis_algorithm = unpacking(chosen_algorithm)
+        client_ciphers = client_algorithms.get('ciphers', None)
+        client_modes = client_algorithms.get('modes', None)
+        client_hashes = client_algorithms.get('hashes', None)
 
-            if (
-                cipher in self.AVAILABLE_CIPHERS
-                and mode in self.AVAILABLE_MODES
-                and synthesis_algorithm in self.AVAILABLE_HASHES
-                and not (cipher == "TripleDES" and mode == "GCM")
-            ):
-                self.current_algorithm = ProtoAlgorithm(
-                    cipher, mode, synthesis_algorithm
-                )
+        if client_ciphers is None and client_modes is None and client_hashes is None:
+            logger.warning("Invalid algorithm request!")
+            return False
 
-                logger.info(
-                    f"Process algorithm negotiation: {message}\t Algorithm Accepted"
-                )
+        common_ciphers = list(
+            set(client_ciphers).intersection(set(self.AVAILABLE_CIPHERS)))
+        common_modes = list(
+            set(client_modes).intersection(set(self.AVAILABLE_MODES)))
+        common_hashes = list(
+            set(client_hashes).intersection(set(self.AVAILABLE_HASHES)))
 
-                message = {"type": "OK"}
-                self.state = STATE_ALGORITHM_ACK
-                self._send(message)
-                return True
-            else:
-                logger.warning("Server does not implement request algorithm")
-        return False
+        if common_ciphers == [] or common_modes == [] or common_hashes == []:
+            logger.warning("Invalid algorithm request!")
+            return False
+
+        message = {
+            'type': 'AVAILABLE_ALGORITHMS',
+            'data': {
+                'ciphers': common_ciphers,
+                'modes': common_modes,
+                'hashes': common_hashes
+            }
+        }
+
+        self._send(message)
+        self.state = STATE_ALGORITHMS
+        return True
 
     def process_open(self, message: str) -> bool:
         """
@@ -322,7 +357,8 @@ class ClientHandler(asyncio.Protocol):
             if tag is not None:
                 tag = base64.b64decode(tag)
 
-            h = MAC(self.shared_key, self.current_algorithm.synthesis_algorithm)
+            h = MAC(self.shared_key,
+                    self.current_algorithm.synthesis_algorithm)
             h.update(encrypted_data)
             current_MAC = h.finalize()
 
@@ -339,12 +375,12 @@ class ClientHandler(asyncio.Protocol):
                     padding_length,
                     iv,
                     tag,
-                )
-            )
+                ))
 
             bdata = base64.b64decode(decrypted_data)
         except:
-            logger.exception("Could not decode base64 content from message.data")
+            logger.exception(
+                "Could not decode base64 content from message.data")
             return False
 
         try:
@@ -390,7 +426,8 @@ class ClientHandler(asyncio.Protocol):
 def main():
     global storage_dir
 
-    parser = argparse.ArgumentParser(description="Receives files from clients.")
+    parser = argparse.ArgumentParser(
+        description="Receives files from clients.")
     parser.add_argument(
         "-v",
         action="count",
@@ -431,7 +468,8 @@ def main():
     coloredlogs.install(level)
     logger.setLevel(level)
 
-    logger.info("Port: {} LogLevel: {} Storage: {}".format(port, level, storage_dir))
+    logger.info("Port: {} LogLevel: {} Storage: {}".format(
+        port, level, storage_dir))
     tcp_server(ClientHandler, worker=2, port=port, reuse_port=True)
 
 
