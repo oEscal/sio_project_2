@@ -353,59 +353,6 @@ class ClientProtocol(asyncio.Protocol):
             logger.info("Change Key")
             self.process_DH()
 
-    def send_file2(self, file_name: str) -> None:
-        """
-        Sends a file to the server.
-        The file is read in chunks, encoded to Base64 and sent as part of a DATA JSON message
-        :param file_name: File to send
-        :return:  None
-        """
-
-        logger.info("Sending file to Server...")
-        status = True
-        with open(file_name, "rb") as f:
-            message = {"type": "DATA", "data": None}
-            read_size = 16 * 60
-            while True:
-                data = f.read(16 * 60)
-
-                chiper, mode = (
-                    self.current_algorithm.cipher,
-                    self.current_algorithm.mode,
-                )
-                try:
-                    encrypted_data, padding_length, iv, tag = encryption(
-                        data, self.shared_key, chiper, mode)
-                except asyncio.EX as e:
-                    logger.warning("Cipher and Mode are incompatibles"
-                                   )  #GCM E 3DES incompativeis
-                    self.transport.close()
-                    self.loop.stop()
-                    status = False
-                    break
-
-                message["padding_length"] = padding_length
-
-                message["iv"] = base64.b64encode(iv).decode()
-
-                if tag is not None:
-                    message["tag"] = base64.b64encode(tag).decode()
-
-                h = MAC(self.shared_key,
-                        self.current_algorithm.synthesis_algorithm)
-                h.update(encrypted_data)
-
-                message["MAC"] = base64.b64encode(h.finalize()).decode()
-                message["data"] = base64.b64encode(encrypted_data).decode()
-
-                self._send(message)
-
-                if len(data) != read_size:
-                    break
-            if status:
-                self._send({"type": "CLOSE"})
-                logger.info("File transferred. Closing transport")
-                self.transport.close()
 
     def _send(self, message: str) -> None:
         """
