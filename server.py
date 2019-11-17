@@ -6,13 +6,21 @@ import coloredlogs, logging
 import re
 import os
 from aio_tcpserver import tcp_server
-from utils import  ProtoAlgorithm, unpacking, DH_parameters, DH_parametersNumbers,key_derivation, length_by_cipher, \
-        decryption,MAC
+from utils import (
+    ProtoAlgorithm,
+    unpacking,
+    DH_parameters,
+    DH_parametersNumbers,
+    key_derivation,
+    length_by_cipher,
+    decryption,
+    MAC,
+)
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
-logger = logging.getLogger('root')
+logger = logging.getLogger("root")
 
 STATE_CONNECT = 0
 STATE_OPEN = 1
@@ -22,8 +30,8 @@ STATE_KEY = 4
 STATE_ALGORITHM_ACK = 5
 STATE_DH_EXCHANGE_KEYS = 6
 
-#GLOBAL
-storage_dir = 'files'
+# GLOBAL
+storage_dir = "files"
 
 
 class ClientHandler(asyncio.Protocol):
@@ -37,8 +45,8 @@ class ClientHandler(asyncio.Protocol):
         self.file_name = None
         self.file_path = None
         self.storage_dir = storage_dir
-        self.buffer = ''
-        self.peername = ''
+        self.buffer = ""
+        self.peername = ""
         self.current_algorithm = None
         self.DH_private_key = None
         self.DH_public_key = None
@@ -55,8 +63,8 @@ class ClientHandler(asyncio.Protocol):
 		:param transport: The transport stream to use with this client
 		:return:
 		"""
-        self.peername = transport.get_extra_info('peername')
-        logger.info('\n\nConnection from {}'.format(self.peername))
+        self.peername = transport.get_extra_info("peername")
+        logger.info("\n\nConnection from {}".format(self.peername))
         self.transport = transport
         self.state = STATE_CONNECT
 
@@ -68,26 +76,26 @@ class ClientHandler(asyncio.Protocol):
         :param data: The data that was received. This may not be a complete JSON message
         :return:
         """
-        logger.debug('Received: {}'.format(data))
+        logger.debug("Received: {}".format(data))
         try:
             self.buffer += data.decode()
         except:
-            logger.exception('Could not decode data from client')
+            logger.exception("Could not decode data from client")
 
-        idx = self.buffer.find('\r\n')
+        idx = self.buffer.find("\r\n")
 
         while idx >= 0:  # While there are separators
-            frame = self.buffer[:idx + 2].strip()  # Extract the JSON object
+            frame = self.buffer[: idx + 2].strip()  # Extract the JSON object
             self.buffer = self.buffer[
-                idx + 2:]  # Removes the JSON object from the buffer
+                idx + 2 :
+            ]  # Removes the JSON object from the buffer
 
             self.on_frame(frame)  # Process the frame
-            idx = self.buffer.find('\r\n')
+            idx = self.buffer.find("\r\n")
 
-        if len(self.buffer
-               ) > 4096 * 1024 * 1024:  # If buffer is larger than 4M
-            logger.warning('Buffer to large')
-            self.buffer = ''
+        if len(self.buffer) > 4096 * 1024 * 1024:  # If buffer is larger than 4M
+            logger.warning("Buffer to large")
+            self.buffer = ""
             self.transport.close()
 
     def on_frame(self, frame: str) -> None:
@@ -97,7 +105,7 @@ class ClientHandler(asyncio.Protocol):
 		:param frame: The JSON object to process
 		:return:
 		"""
-        #logger.debug("Frame: {}".format(frame))
+        # logger.debug("Frame: {}".format(frame))
 
         try:
             message = json.loads(frame)
@@ -106,25 +114,25 @@ class ClientHandler(asyncio.Protocol):
             self.transport.close()
             return
 
-        mtype = message.get('type', "").upper()
+        mtype = message.get("type", "").upper()
 
-        if mtype == 'OPEN':
+        if mtype == "OPEN":
             ret = self.process_open(message)
-        elif mtype == 'DATA':
+        elif mtype == "DATA":
             ret = self.process_data(message)
-        elif mtype == 'CLOSE':
+        elif mtype == "CLOSE":
             ret = self.process_close(message)
-        elif mtype == 'ALGORITHM_NEGOTIATION':
+        elif mtype == "ALGORITHM_NEGOTIATION":
             ret = self.process_algorithm_negotiation(message)
-        elif mtype == 'PARAMETERS_AND_DH_PUBLIC_KEY':
+        elif mtype == "PARAMETERS_AND_DH_PUBLIC_KEY":
             ret = self.process_DH_Public_Key(message)
         else:
-            logger.warning("Invalid message type: {}".format(message['type']))
+            logger.warning("Invalid message type: {}".format(message["type"]))
             ret = False
 
         if not ret:
             try:
-                self._send({'type': 'ERROR', 'message': 'See server'})
+                self._send({"type": "ERROR", "message": "See server"})
             except:
                 pass  # Silently ignore
 
@@ -145,7 +153,7 @@ class ClientHandler(asyncio.Protocol):
         if self.state != STATE_ALGORITHM_ACK:
             return False
 
-        data = message.get('data', None)
+        data = message.get("data", None)
         if data is None:
             return False
 
@@ -153,9 +161,9 @@ class ClientHandler(asyncio.Protocol):
 
         try:
 
-            p = data.get('p', 'None')
-            g = data.get('g', 'None')
-            key = data.get('key')
+            p = data.get("p", "None")
+            g = data.get("g", "None")
+            key = data.get("key")
 
             parameters = DH_parametersNumbers(p, g)
 
@@ -163,11 +171,10 @@ class ClientHandler(asyncio.Protocol):
             self.DH_public_key = self.DH_private_key.public_key()
 
             message = {
-                'type':
-                'DH_PUBLIC_KEY',
-                'key':
-                self.DH_public_key.public_bytes(
-                    Encoding.PEM, PublicFormat.SubjectPublicKeyInfo).decode()
+                "type": "DH_PUBLIC_KEY",
+                "key": self.DH_public_key.public_bytes(
+                    Encoding.PEM, PublicFormat.SubjectPublicKeyInfo
+                ).decode(),
             }
 
             self._send(message)
@@ -178,7 +185,9 @@ class ClientHandler(asyncio.Protocol):
                 self.current_algorithm.synthesis_algorithm,
                 length_by_cipher[self.current_algorithm.cipher],
                 self.DH_private_key.exchange(
-                    load_pem_public_key(key.encode(), default_backend())))
+                    load_pem_public_key(key.encode(), default_backend())
+                ),
+            )
 
             logger.info(f"Shared_key with DH : {self.shared_key}")
         except Exception as e:
@@ -200,22 +209,25 @@ class ClientHandler(asyncio.Protocol):
             return False
 
         chosen_algorithm = message.get("data", None)
-        
 
         if chosen_algorithm is not None:
-            algorithm, cipher, mode, synthesis_algorithm = unpacking(
-                chosen_algorithm)
+            algorithm, cipher, mode, synthesis_algorithm = unpacking(chosen_algorithm)
 
-            if cipher in self.AVAILABLE_CIPHERS and mode in self.AVAILABLE_MODES and synthesis_algorithm in self.AVAILABLE_HASHES and \
-             not (cipher == 'TripleDES' and mode == 'GCM'):
+            if (
+                cipher in self.AVAILABLE_CIPHERS
+                and mode in self.AVAILABLE_MODES
+                and synthesis_algorithm in self.AVAILABLE_HASHES
+                and not (cipher == "TripleDES" and mode == "GCM")
+            ):
                 self.current_algorithm = ProtoAlgorithm(
-                    cipher, mode, synthesis_algorithm)
+                    cipher, mode, synthesis_algorithm
+                )
 
                 logger.info(
                     f"Process algorithm negotiation: {message}\t Algorithm Accepted"
                 )
 
-                message = {'type': 'OK'}
+                message = {"type": "OK"}
                 self.state = STATE_ALGORITHM_ACK
                 self._send(message)
                 return True
@@ -237,12 +249,12 @@ class ClientHandler(asyncio.Protocol):
             logger.warning("Invalid state. Discarding")
             return False
 
-        if not 'file_name' in message:
+        if not "file_name" in message:
             logger.warning("No filename in Open")
             return False
 
         # Only chars and letters in the filename
-        file_name = re.sub(r'[^\w\.]', '', message['file_name'])
+        file_name = re.sub(r"[^\w\.]", "", message["file_name"])
         file_path = os.path.join(self.storage_dir, file_name)
         if not os.path.exists("files"):
             try:
@@ -258,7 +270,7 @@ class ClientHandler(asyncio.Protocol):
             logger.exception("Unable to open file")
             return False
 
-        self._send({'type': 'OK'})
+        self._send({"type": "OK"})
 
         self.file_name = file_name
         self.file_path = file_path
@@ -287,7 +299,7 @@ class ClientHandler(asyncio.Protocol):
             return False
 
         try:
-            data = message.get('data', None)
+            data = message.get("data", None)
             if data is None:
                 logger.debug("Invalid message. No data found")
                 return False
@@ -295,23 +307,22 @@ class ClientHandler(asyncio.Protocol):
             cipher = self.current_algorithm.cipher
             mode = self.current_algorithm.mode
 
-            padding_length = message.get('padding_length', None)
-            iv = message.get('iv', None)
-            MAC_b64 = message.get('MAC', None)
-            tag = message.get('tag', None)
+            padding_length = message.get("padding_length", None)
+            iv = message.get("iv", None)
+            MAC_b64 = message.get("MAC", None)
+            tag = message.get("tag", None)
 
             if padding_length is None or iv is None or MAC_b64 is None:
                 return False
 
             iv = base64.b64decode(iv)
-            encrypted_data = base64.b64decode(message['data'])
+            encrypted_data = base64.b64decode(message["data"])
             received_MAC = base64.b64decode(MAC_b64)
 
             if tag is not None:
                 tag = base64.b64decode(tag)
 
-            h = MAC(self.shared_key,
-                    self.current_algorithm.synthesis_algorithm)
+            h = MAC(self.shared_key, self.current_algorithm.synthesis_algorithm)
             h.update(encrypted_data)
             current_MAC = h.finalize()
 
@@ -320,13 +331,20 @@ class ClientHandler(asyncio.Protocol):
                 return False
 
             decrypted_data = base64.b64encode(
-                decryption(encrypted_data, self.shared_key, cipher, mode,
-                           padding_length, iv, tag))
+                decryption(
+                    encrypted_data,
+                    self.shared_key,
+                    cipher,
+                    mode,
+                    padding_length,
+                    iv,
+                    tag,
+                )
+            )
 
             bdata = base64.b64decode(decrypted_data)
         except:
-            logger.exception(
-                "Could not decode base64 content from message.data")
+            logger.exception("Could not decode base64 content from message.data")
             return False
 
         try:
@@ -365,33 +383,38 @@ class ClientHandler(asyncio.Protocol):
 		"""
         logger.debug("Send: {}".format(message))
 
-        message_b = (json.dumps(message) + '\r\n').encode()
+        message_b = (json.dumps(message) + "\r\n").encode()
         self.transport.write(message_b)
 
 
 def main():
     global storage_dir
 
-    parser = argparse.ArgumentParser(
-        description='Receives files from clients.')
-    parser.add_argument('-v',
-                        action='count',
-                        dest='verbose',
-                        help='Shows debug messages (default=False)',
-                        default=0)
-    parser.add_argument('-p',
-                        type=int,
-                        nargs=1,
-                        dest='port',
-                        default=5000,
-                        help='TCP Port to use (default=5000)')
+    parser = argparse.ArgumentParser(description="Receives files from clients.")
+    parser.add_argument(
+        "-v",
+        action="count",
+        dest="verbose",
+        help="Shows debug messages (default=False)",
+        default=0,
+    )
+    parser.add_argument(
+        "-p",
+        type=int,
+        nargs=1,
+        dest="port",
+        default=5000,
+        help="TCP Port to use (default=5000)",
+    )
 
-    parser.add_argument('-d',
-                        type=str,
-                        required=False,
-                        dest='storage_dir',
-                        default='files',
-                        help='Where to store files (default=./files)')
+    parser.add_argument(
+        "-d",
+        type=str,
+        required=False,
+        dest="storage_dir",
+        default="files",
+        help="Where to store files (default=./files)",
+    )
 
     args = parser.parse_args()
     storage_dir = os.path.abspath(args.storage_dir)
@@ -408,10 +431,9 @@ def main():
     coloredlogs.install(level)
     logger.setLevel(level)
 
-    logger.info("Port: {} LogLevel: {} Storage: {}".format(
-        port, level, storage_dir))
+    logger.info("Port: {} LogLevel: {} Storage: {}".format(port, level, storage_dir))
     tcp_server(ClientHandler, worker=2, port=port, reuse_port=True)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
