@@ -7,23 +7,18 @@ import re
 import os
 from aio_tcpserver import tcp_server
 from utils import ProtoAlgorithm, unpacking, DH_parameters, DH_parametersNumbers, \
-    key_derivation, length_by_cipher, decryption, MAC
+    key_derivation, length_by_cipher, decryption, MAC, \
+    STATE_CONNECT, STATE_OPEN, STATE_DATA, STATE_CLOSE, STATE_ALGORITHMS, \
+    STATE_ALGORITHM_ACK, STATE_DH_EXCHANGE_KEYS
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
+
 logger = logging.getLogger("root")
 
-STATE_CONNECT = 0
-STATE_OPEN = 1
-STATE_DATA = 2
-STATE_CLOSE = 3
-STATE_ALGORITHMS = 4
-STATE_ALGORITHM_ACK = 5
-STATE_DH_EXCHANGE_KEYS = 6
-
 # GLOBAL
-storage_dir = "files"
+STORAGE_DIR = "files"
 
 
 class ClientHandler(asyncio.Protocol):
@@ -36,14 +31,16 @@ class ClientHandler(asyncio.Protocol):
         self.file = None
         self.file_name = None
         self.file_path = None
-        self.storage_dir = storage_dir
+        self.storage_dir = STORAGE_DIR
         self.buffer = ""
         self.peername = ""
         self.current_algorithm = None
-        self.DH_private_key = None
-        self.DH_public_key = None
+        self.dh_private_key = None
+        self.dh_public_key = None
         self.shared_key = None
         self.salt = None
+
+        # algorithms
         self.AVAILABLE_CIPHERS = ["ChaCha20", "AES", "TripleDES"]
         self.AVAILABLE_HASHES = ["SHA256", "SHA512", "MD5"]
         self.AVAILABLE_MODES = ["CBC", "GCM"]
@@ -177,23 +174,19 @@ class ClientHandler(asyncio.Protocol):
             return False
 
         logger.debug(f"Client DH_public_key : {data}")
-
         try:
-
             p = data.get("p", "None")
             g = data.get("g", "None")
             key = data.get("key")
 
             parameters = DH_parametersNumbers(p, g)
 
-            self.DH_private_key = parameters.generate_private_key()
-            self.DH_public_key = self.DH_private_key.public_key()
+            self.dh_private_key = parameters.generate_private_key()
+            self.dh_public_key = self.dh_private_key.public_key()
 
             message = {
-                "type":
-                "DH_PUBLIC_KEY",
-                "key":
-                self.DH_public_key.public_bytes(
+                "type": "DH_PUBLIC_KEY",
+                "key": self.dh_public_key.public_bytes(
                     Encoding.PEM, PublicFormat.SubjectPublicKeyInfo).decode(),
             }
 
@@ -204,7 +197,7 @@ class ClientHandler(asyncio.Protocol):
             self.shared_key = key_derivation(
                 self.current_algorithm.synthesis_algorithm,
                 length_by_cipher[self.current_algorithm.cipher],
-                self.DH_private_key.exchange(
+                self.dh_private_key.exchange(
                     load_pem_public_key(key.encode(), default_backend())),
             )
 
@@ -416,7 +409,7 @@ class ClientHandler(asyncio.Protocol):
 
 
 def main():
-    global storage_dir
+    global STORAGE_DIR
 
     parser = argparse.ArgumentParser(
         description="Receives files from clients.")
@@ -446,7 +439,7 @@ def main():
     )
 
     args = parser.parse_args()
-    storage_dir = os.path.abspath(args.storage_dir)
+    STORAGE_DIR = os.path.abspath(args.storage_dir)
     level = logging.DEBUG if args.verbose > 0 else logging.INFO
     port = args.port
     if port <= 0 or port > 65535:
@@ -461,7 +454,7 @@ def main():
     logger.setLevel(level)
 
     logger.info("Port: {} LogLevel: {} Storage: {}".format(
-        port, level, storage_dir))
+        port, level, STORAGE_DIR))
     tcp_server(ClientHandler, worker=2, port=port, reuse_port=True)
 
 

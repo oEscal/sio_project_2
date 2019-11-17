@@ -8,8 +8,25 @@ from cryptography.hazmat.backends.interfaces import CipherBackend
 from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 import binascii
-
 import random
+
+
+# States common betwen the server and the client
+STATE_CONNECT = 0
+STATE_OPEN = 1
+STATE_DATA = 2
+STATE_CLOSE = 3
+STATE_DH_EXCHANGE_KEYS = 6
+
+# Client's states
+STATE_KEY = 4
+STATE_ALGORITHM_NEGOTIATION = 5
+
+# Server's states
+STATE_ALGORITHMS = 4
+STATE_ALGORITHM_ACK = 5
+
+
 
 length_by_cipher = {"ChaCha20": 32, "AES": 32, "TripleDES": 24}
 

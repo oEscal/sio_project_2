@@ -6,20 +6,15 @@ import coloredlogs, logging
 import os
 import random
 from utils import ProtoAlgorithm, DH_parameters, encryption, unpacking, \
-    length_by_cipher, key_derivation, MAC, test_compatibility
+    length_by_cipher, key_derivation, MAC, test_compatibility, key_derivation, \
+    STATE_CONNECT, STATE_OPEN, STATE_DATA, STATE_CLOSE, STATE_KEY, \
+    STATE_ALGORITHM_NEGOTIATION, STATE_DH_EXCHANGE_KEYS
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
-logger = logging.getLogger("root")
 
-STATE_CONNECT = 0
-STATE_OPEN = 1
-STATE_DATA = 2
-STATE_CLOSE = 3
-STATE_KEY = 4
-STATE_ALGORITHM_NEGOTIATION = 5
-STATE_DH_EXCHANGE_KEYS = 6
+logger = logging.getLogger("root")
 
 
 class ClientProtocol(asyncio.Protocol):
@@ -39,16 +34,18 @@ class ClientProtocol(asyncio.Protocol):
         self.buffer = ""  # Buffer to receive data chunks
 
         self.current_algorithm = None
-        self.DH_private_key = None
-        self.DH_public_key = None
+        self.dh_private_key = None
+        self.dh_public_key = None
         self.shared_key = None
-        self.AVAILABLE_CIPHERS = ["ChaCha20", "AES", "TripleDES", "Blowfish", "ARC4"]
-        self.AVAILABLE_HASHES = ["SHA256", "SHA512", "MD5"]
-        self.AVAILABLE_MODES = ["CBC", "GCM", "ECB"]
         self.random = random
         self.cipher = cipher
         self.mode = mode
         self.synthesis = synthesis
+
+        # algorithms
+        self.AVAILABLE_CIPHERS = ["ChaCha20", "AES", "TripleDES", "Blowfish", "ARC4"]
+        self.AVAILABLE_HASHES = ["SHA256", "SHA512", "MD5"]
+        self.AVAILABLE_MODES = ["CBC", "GCM", "ECB"]
 
     def connection_made(self, transport) -> None:
         """
@@ -147,22 +144,18 @@ class ClientProtocol(asyncio.Protocol):
 
         parameters = DH_parameters()
 
-        self.DH_private_key = parameters.generate_private_key()
-        self.DH_public_key = self.DH_private_key.public_key()
+        self.dh_private_key = parameters.generate_private_key()
+        self.dh_public_key = self.dh_private_key.public_key()
 
         message = {
             "type": "PARAMETERS_AND_DH_PUBLIC_KEY",
             "data": {
-                "p":
-                parameters.parameter_numbers().p,
-                "g":
-                parameters.parameter_numbers().g,
-                "key":
-                self.DH_public_key.public_bytes(
+                "p": parameters.parameter_numbers().p,
+                "g": parameters.parameter_numbers().g,
+                "key": self.dh_public_key.public_bytes(
                     Encoding.PEM, PublicFormat.SubjectPublicKeyInfo).decode(),
             },
         }
-
         self._send(message)
 
         self.state = STATE_DH_EXCHANGE_KEYS
@@ -220,7 +213,7 @@ class ClientProtocol(asyncio.Protocol):
             self.shared_key = key_derivation(
                 self.current_algorithm.synthesis_algorithm,
                 length_by_cipher[self.current_algorithm.cipher],
-                self.DH_private_key.exchange(
+                self.dh_private_key.exchange(
                     load_pem_public_key(key.encode(), default_backend())),
             )
 
@@ -318,10 +311,6 @@ class ClientProtocol(asyncio.Protocol):
                 h.update(encrypted_data)
 
                 message["MAC"] = base64.b64encode(h.finalize()).decode()
-
-                # Testar o MAC
-                # encrypted_data+="\x00".encode()
-
                 message["data"] = base64.b64encode(encrypted_data).decode()
 
                 self._send(message)
