@@ -6,8 +6,8 @@ import coloredlogs, logging
 import re
 import os
 from aio_tcpserver import tcp_server
-from utils import AVAILABLE_CIPHERS, AVAILABLE_HASHES, AVAILABLE_MODES, ProtoAlgorithm, unpacking, DH_parameters, DH_parametersNumbers,\
-         key_derivation, length_by_cipher, decryption,MAC
+from utils import  ProtoAlgorithm, unpacking, DH_parameters, DH_parametersNumbers,key_derivation, length_by_cipher, \
+        decryption,MAC
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
@@ -44,6 +44,9 @@ class ClientHandler(asyncio.Protocol):
         self.DH_public_key = None
         self.shared_key = None
         self.salt = None
+        self.AVAILABLE_CIPHERS = ["ChaCha20", "AES", "TripleDES"]
+        self.AVAILABLE_HASHES = ["SHA256", "SHA512", "MD5"]
+        self.AVAILABLE_MODES = ["CBC", "GCM"]
 
     def connection_made(self, transport) -> None:
         """
@@ -172,7 +175,8 @@ class ClientHandler(asyncio.Protocol):
             self.state = STATE_DH_EXCHANGE_KEYS
 
             self.shared_key = key_derivation(
-                "SHA512", length_by_cipher[self.current_algorithm.cipher],
+                self.current_algorithm.synthesis_algorithm,
+                length_by_cipher[self.current_algorithm.cipher],
                 self.DH_private_key.exchange(
                     load_pem_public_key(key.encode(), default_backend())))
 
@@ -196,13 +200,14 @@ class ClientHandler(asyncio.Protocol):
             return False
 
         chosen_algorithm = message.get("data", None)
-        status = True
+        
 
         if chosen_algorithm is not None:
             algorithm, cipher, mode, synthesis_algorithm = unpacking(
                 chosen_algorithm)
 
-            if cipher in AVAILABLE_CIPHERS and mode in AVAILABLE_MODES and synthesis_algorithm in AVAILABLE_HASHES:
+            if cipher in self.AVAILABLE_CIPHERS and mode in self.AVAILABLE_MODES and synthesis_algorithm in self.AVAILABLE_HASHES and \
+             not (cipher == 'TripleDES' and mode == 'GCM'):
                 self.current_algorithm = ProtoAlgorithm(
                     cipher, mode, synthesis_algorithm)
 
@@ -212,20 +217,10 @@ class ClientHandler(asyncio.Protocol):
 
                 message = {'type': 'OK'}
                 self.state = STATE_ALGORITHM_ACK
-
+                self._send(message)
+                return True
             else:
-                message = {
-                    'type':
-                    'ERROR',
-                    'message':
-                    'Server does not implement algorithm requested by client'
-                }
-                status = False
-
-            self._send(message)
-
-            return status
-
+                logger.warning("Server does not implement request algorithm")
         return False
 
     def process_open(self, message: str) -> bool:
@@ -300,20 +295,23 @@ class ClientHandler(asyncio.Protocol):
             cipher = self.current_algorithm.cipher
             mode = self.current_algorithm.mode
 
-
             padding_length = message.get('padding_length', None)
-            iv = message.get('iv',None)
-            MAC_b64 = message.get('MAC',None)
+            iv = message.get('iv', None)
+            MAC_b64 = message.get('MAC', None)
+            tag = message.get('tag', None)
 
             if padding_length is None or iv is None or MAC_b64 is None:
                 return False
 
-            
             iv = base64.b64decode(iv)
             encrypted_data = base64.b64decode(message['data'])
-            received_MAC =  base64.b64decode(MAC_b64)
-            
-            h = MAC(self.shared_key,self.current_algorithm.synthesis_algorithm)
+            received_MAC = base64.b64decode(MAC_b64)
+
+            if tag is not None:
+                tag = base64.b64decode(tag)
+
+            h = MAC(self.shared_key,
+                    self.current_algorithm.synthesis_algorithm)
             h.update(encrypted_data)
             current_MAC = h.finalize()
 
@@ -321,10 +319,11 @@ class ClientHandler(asyncio.Protocol):
                 logger.warning("MAC authentication Failed")
                 return False
 
+            decrypted_data = base64.b64encode(
+                decryption(encrypted_data, self.shared_key, cipher, mode,
+                           padding_length, iv, tag))
 
-            decrypted_data = base64.b64encode(decryption(encrypted_data, self.shared_key, cipher, mode,padding_length,iv))
-            
-            bdata = base64.b64decode( decrypted_data )
+            bdata = base64.b64decode(decrypted_data)
         except:
             logger.exception(
                 "Could not decode base64 content from message.data")
