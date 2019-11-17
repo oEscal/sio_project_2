@@ -20,7 +20,8 @@ class ClientProtocol(asyncio.Protocol):
     """
     Client that handles a single client
     """
-    def __init__(self, file_name, loop, random, cipher, mode, synthesis):
+    def __init__(self, file_name, loop, random, cipher, mode, synthesis,
+                 dh_key_size):
         """
         Default constructor
         :param file_name: Name of the file to send
@@ -40,6 +41,11 @@ class ClientProtocol(asyncio.Protocol):
         self.cipher = cipher
         self.mode = mode
         self.synthesis = synthesis
+        self.iterations_per_key = None
+        self.iteration_counter = 0
+        self.changing_key = False
+        self.file_padding = 0
+        self.dh_key_size = dh_key_size
 
         # algorithms
         self.AVAILABLE_CIPHERS = [
@@ -113,24 +119,42 @@ class ClientProtocol(asyncio.Protocol):
             if self.state == STATE_ALGORITHM_NEGOTIATION:
                 logger.info("Algorithm accepted from server")
                 self.process_DH()
+
             elif self.state == STATE_OPEN:
                 self.send_file(self.file_name)
+
             elif self.state == STATE_DATA:  # Got an OK during a message transfer.
                 # Reserved for future use
                 pass
             else:
                 logger.warning("Ignoring message from server")
             return
+
+        elif mtype == "ITERATIONS_PER_KEY":
+            if self.state == STATE_OPEN:
+                iterations_per_key = message.get("data", None)
+                if iterations_per_key is not None:
+                    self.iterations_per_key = iterations_per_key
+                    logger.info(
+                        f"Setting limit for keys rotations (iterations) : {self.iterations_per_key}"
+                    )
+                    self.send_file(self.file_name)
+                    return
+
+            logger.warning("Invalid State!")
+
         elif mtype == 'AVAILABLE_ALGORITHMS':
             if self.state == STATE_ALGORITHM_NEGOTIATION:
                 self.chose_algorithm(message)
                 return
             logger.warning("Invalid state")
+
         elif mtype == "DH_PUBLIC_KEY":
             if self.state == STATE_DH_EXCHANGE_KEYS:
                 self.get_server_DH_key(message)
                 return
             logger.warning("Invalid state")
+
         elif mtype == "ERROR":
             logger.warning("Got error from server: {}".format(
                 message.get("message", None)))
@@ -143,7 +167,7 @@ class ClientProtocol(asyncio.Protocol):
     def process_DH(self):
         logger.info("Initializing DH")
 
-        parameters = DH_parameters()
+        parameters = DH_parameters(self.dh_key_size)
 
         self.dh_private_key = parameters.generate_private_key()
         self.dh_public_key = self.dh_private_key.public_key()
@@ -224,6 +248,8 @@ class ClientProtocol(asyncio.Protocol):
             logger.info(f"Shared Key with DH : {self.shared_key}")
 
         self.send_fileName()
+        self.iteration_counter = 0
+        self.changing_key = False
 
         self.state = STATE_OPEN  # Ready To send
 
@@ -282,6 +308,58 @@ class ClientProtocol(asyncio.Protocol):
         :param file_name: File to send
         :return:  None
         """
+        logger.info("Sending file to Server...")
+
+        with open(file_name, "rb") as f:
+            message = {"type": "DATA", "data": None}
+            read_size = 16 * 60
+            status = True
+            f.seek(self.file_padding)
+            for i in range(self.iterations_per_key):
+                data = f.read(read_size)
+
+                self.file_padding += read_size
+
+                chiper, mode = (
+                    self.current_algorithm.cipher,
+                    self.current_algorithm.mode,
+                )
+
+                encrypted_data, padding_length, iv, tag = encryption(
+                    data, self.shared_key, chiper, mode)
+
+                message["padding_length"] = padding_length
+
+                message["iv"] = base64.b64encode(iv).decode()
+
+                if tag is not None:
+                    message["tag"] = base64.b64encode(tag).decode()
+
+                h = MAC(self.shared_key,
+                        self.current_algorithm.synthesis_algorithm)
+                h.update(encrypted_data)
+
+                message["MAC"] = base64.b64encode(h.finalize()).decode()
+                message["data"] = base64.b64encode(encrypted_data).decode()
+
+                self._send(message)
+
+                if len(data) != read_size:
+                    self._send({"type": "CLOSE"})
+                    logger.info("File transferred. Closing transport")
+                    self.transport.close()
+                    return
+
+            logger.info("Change Key")
+            self.process_DH()
+
+    def send_file2(self, file_name: str) -> None:
+        """
+        Sends a file to the server.
+        The file is read in chunks, encoded to Base64 and sent as part of a DATA JSON message
+        :param file_name: File to send
+        :return:  None
+        """
 
         logger.info("Sending file to Server...")
         status = True
@@ -320,9 +398,7 @@ class ClientProtocol(asyncio.Protocol):
                 message["MAC"] = base64.b64encode(h.finalize()).decode()
                 message["data"] = base64.b64encode(encrypted_data).decode()
 
-                
                 self._send(message)
-                
 
                 if len(data) != read_size:
                     break
@@ -394,6 +470,14 @@ def main():
         default="SHA512",
         help="Synthesis algorithm (default SHA512)",
     )
+    parser.add_argument(
+        "--dh_key_size",
+        type=int,
+        dest="dh_key_size",
+        default=1024,
+        required=False,
+        help="DH generator key size (default 1024)",
+    )
 
     args = parser.parse_args()
     file_name = os.path.abspath(args.file_name)
@@ -404,19 +488,22 @@ def main():
     coloredlogs.install(level)
     logger.setLevel(level)
 
-    logger.info("Sending file: {} to {}:{} LogLevel: {}".format(
-        file_name, server, port, level))
-
-    loop = asyncio.get_event_loop()
-    coro = loop.create_connection(
-        lambda: ClientProtocol(file_name, loop, args.random, args.cipher, args.
-                               mode, args.synthesis),
-        server,
-        port,
-    )
-    loop.run_until_complete(coro)
-    loop.run_forever()
-    loop.close()
+   
+    if args.dh_key_size >=512:
+        logger.info("Sending file: {} to {}:{} LogLevel: {}".format(
+            file_name, server, port, level))
+        loop = asyncio.get_event_loop()
+        coro = loop.create_connection(
+            lambda: ClientProtocol(file_name, loop, args.random, args.cipher, args.
+                                mode, args.synthesis, args.dh_key_size),
+            server,
+            port,
+        )
+        loop.run_until_complete(coro)
+        loop.run_forever()
+        loop.close()
+    else:
+        logger.info("O dh_key_size deverá ser maior ou igual a 512")
 
 
 if __name__ == "__main__":

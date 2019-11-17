@@ -14,12 +14,11 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
-
 logger = logging.getLogger("root")
 
 # GLOBAL
 STORAGE_DIR = "files"
-
+ITERATIONS_PER_KEY = 100
 
 class ClientHandler(asyncio.Protocol):
     def __init__(self, signal):
@@ -38,6 +37,9 @@ class ClientHandler(asyncio.Protocol):
         self.dh_private_key = None
         self.dh_public_key = None
         self.shared_key = None
+        self.iterations_per_key = ITERATIONS_PER_KEY
+        self.current_iteration = 0
+        self.data_print = True  #variable to prevent a logger print spam
 
         # algorithms
         self.AVAILABLE_CIPHERS = ["ChaCha20", "AES", "TripleDES"]
@@ -165,7 +167,7 @@ class ClientHandler(asyncio.Protocol):
 			Also server creates their own DH_keys and sent public key to server
 		"""
 
-        if self.state != STATE_ALGORITHM_ACK:
+        if not (self.state == STATE_ALGORITHM_ACK or self.state == STATE_DATA):
             return False
 
         data = message.get("data", None)
@@ -184,8 +186,10 @@ class ClientHandler(asyncio.Protocol):
             self.dh_public_key = self.dh_private_key.public_key()
 
             message = {
-                "type": "DH_PUBLIC_KEY",
-                "key": self.dh_public_key.public_bytes(
+                "type":
+                "DH_PUBLIC_KEY",
+                "key":
+                self.dh_public_key.public_bytes(
                     Encoding.PEM, PublicFormat.SubjectPublicKeyInfo).decode(),
             }
 
@@ -215,7 +219,6 @@ class ClientHandler(asyncio.Protocol):
 		:param message: The message to process
 		:return: Boolean indicating the success of the operation
 		"""
-        logger.info("Process Open: {}".format(message))
 
         if self.state != STATE_DH_EXCHANGE_KEYS:
             logger.warning("Invalid state. Discarding")
@@ -236,14 +239,26 @@ class ClientHandler(asyncio.Protocol):
                 return False
 
         try:
-            self.file = open(file_path, "wb")
-            logger.info("File open")
+            if self.current_iteration == 0:
+                self.file = open(file_path, "wb")
+                logger.info("Process Open: {}".format(message))
         except Exception:
             logger.exception("Unable to open file")
             return False
 
-        self._send({"type": "OK"})
+        
 
+        if self.current_iteration == 0:
+            message = {
+                "type": "ITERATIONS_PER_KEY",
+                'data': self.iterations_per_key
+            }
+        else:
+            message = {'type': "OK"}
+
+        self._send(message)
+        self.data_print = True
+        self.current_iteration = 0
         self.file_name = file_name
         self.file_path = file_path
         self.state = STATE_OPEN
@@ -257,7 +272,10 @@ class ClientHandler(asyncio.Protocol):
 		:param message: The message to process
 		:return: Boolean indicating the success of the operation
 		"""
-        logger.info("Processing Data...")
+        if self.data_print:
+            logger.info("Processing Data...")
+
+        self.data_print = False
 
         if self.state == STATE_OPEN:
             self.state = STATE_DATA
@@ -275,6 +293,10 @@ class ClientHandler(asyncio.Protocol):
             if data is None:
                 logger.debug("Invalid message. No data found")
                 return False
+
+            self.current_iteration += 1
+            if self.current_iteration >= self.iterations_per_key:
+                logger.info("Changing Key")
 
             cipher = self.current_algorithm.cipher
             mode = self.current_algorithm.mode
@@ -298,7 +320,7 @@ class ClientHandler(asyncio.Protocol):
                     self.current_algorithm.synthesis_algorithm)
 
             #TEST MAC
-            encrypted_data+=('\x00').encode()
+            #encrypted_data+=('\x00').encode()
 
             h.update(encrypted_data)
             current_MAC = h.finalize()
@@ -319,6 +341,7 @@ class ClientHandler(asyncio.Protocol):
                 ))
 
             bdata = base64.b64decode(decrypted_data)
+
         except:
             logger.exception(
                 "Could not decode base64 content from message.data")
@@ -413,7 +436,7 @@ class ClientHandler(asyncio.Protocol):
 
 def main():
     global STORAGE_DIR
-
+    global ITERATIONS_PER_KEY
     parser = argparse.ArgumentParser(
         description="Receives files from clients.")
     parser.add_argument(
@@ -440,10 +463,18 @@ def main():
         default="files",
         help="Where to store files (default=./files)",
     )
-
+    parser.add_argument(
+        "--limit",
+        type=int,
+        required=False,
+        dest="limit",
+        default=100,
+        help="Limit to make key rotation (number iterations) (default 100)")
 
     args = parser.parse_args()
+
     STORAGE_DIR = os.path.abspath(args.storage_dir)
+    ITERATIONS_PER_KEY = args.limit
     level = logging.DEBUG if args.verbose > 0 else logging.INFO
     port = args.port
     if port <= 0 or port > 65535:

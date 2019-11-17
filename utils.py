@@ -167,9 +167,9 @@ def unpacking(pack_string):
     )
 
 
-def DH_parameters():
+def DH_parameters(key_size):
     return dh.generate_parameters(generator=2,
-                                  key_size=1024,
+                                  key_size=key_size,
                                   backend=default_backend())
 
 
